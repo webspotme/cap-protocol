@@ -35,7 +35,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "smoke": "node -e \"require('./dist/index.js'); console.log('built package loads cleanly')\"",
+    "smoke": "node --input-type=module -e \"import('./dist/index.js').then(() => console.log('built package loads cleanly'))\"",
     "prepublishOnly": "npm run build && npm test && npm run smoke"
   },
   "dependencies": {

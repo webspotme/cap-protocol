@@ -71,6 +71,10 @@ Initial release.
 - Transitive dev-only CVE: GHSA-67mh-4wv8-2f99 in `esbuild` via `vitest@^2.1.0`. Dev-time only (not in `files` allow-list, not shipped to consumers). Tracked for vitest 4.x upgrade post-v0.1.0. (CSO Medium #2.)
 - v0.1.0 ships without a committed `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; CONTRIBUTING.md documents the workflow. (CSO Medium #1, partial.)
 
+### Post-Gemini-round-4 patch (one bonus pre-existing finding)
+
+- **Pre-existing minor:** `package.json` `smoke` script and `release.yml` smoke step both used CommonJS `require()` in a package marked `"type": "module"` — would have failed `prepublishOnly`. Switched both to `node --input-type=module -e "import(...)"`. Pre-existing from the original round-3 release-workflow addition, not introduced by any patch round.
+
 ### Post-Codex-round-4 patch
 
 - **HIGH (recovery uses unvalidated event reader):** `reconcileFromEventLog` now filters every event through `validateEvent` before honoring it, satisfying SPEC G5. Tampered/malformed events are dropped with a stderr warning instead of being trusted by the recovery materializer.

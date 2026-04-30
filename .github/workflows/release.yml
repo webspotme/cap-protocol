@@ -35,9 +35,9 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      # Smoke test: confirm the built dist/ actually loads.
+      # Smoke test: confirm the built dist/ actually loads (ESM import).
       - name: Smoke test built package
-        run: node -e "require('./dist/index.js'); console.log('built package loads cleanly')"
+        run: node --input-type=module -e "import('./dist/index.js').then(() => console.log('built package loads cleanly'))"
 
       # Verify the tag matches package.json version.
       # GITHUB_REF_NAME is a runner-provided env var (not Actions context
