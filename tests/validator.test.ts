@@ -188,4 +188,30 @@ describe('schema interface tightening (HIGH finding fix)', () => {
     const v = validateResource(r);
     expect(v.ok).toBe(false);
   });
+
+  it('rejects active resource with null lifecycle timestamps (Codex r2 P2 #5)', () => {
+    const r = {
+      ...goodResource,
+      lifecycle: {
+        proposed_by: 'tester',
+        proposed_at: '2026-04-30T00:00:00Z',
+        registered_at: null,
+        verified_at: null,
+        activated_at: null,
+        deprecated_at: null,
+        archived_at: null,
+      },
+    };
+    const v = validateResource(r);
+    expect(v.ok).toBe(false);
+  });
+
+  it('rejects active resource missing last_verified (Codex r2 P2 #5)', () => {
+    const r = {
+      ...goodResource,
+      state: { current: 'active', since: '2026-04-30T00:00:00Z', health: 'green', last_verified: null },
+    } as unknown;
+    const v = validateResource(r);
+    expect(v.ok).toBe(false);
+  });
 });

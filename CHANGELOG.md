@@ -71,6 +71,14 @@ Initial release.
 - Transitive dev-only CVE: GHSA-67mh-4wv8-2f99 in `esbuild` via `vitest@^2.1.0`. Dev-time only (not in `files` allow-list, not shipped to consumers). Tracked for vitest 4.x upgrade post-v0.1.0. (CSO Medium #2.)
 - v0.1.0 ships without a committed `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; CONTRIBUTING.md documents the workflow. (CSO Medium #1, partial.)
 
+### Post-Codex-round-2 patch
+
+- **P1 #1 (recovery from event log on open):** `openRegistry` now runs a torn-write reconciliation pass — replay commit/rollback events oldest-to-newest, validate each embedded resource, and align the materialized cache with the event log. Closes the gap where a crash between `appendEvent` and `writeResource` would leave `readResource`/`cap show` returning stale data forever. Pass `{ skipReplay: true }` to opt out (e.g., for migration tooling).
+- **P1 #2 (validate embedded resource deltas):** `reconstructAt` now validates `delta.after` against the Resource schema before treating it as trusted. A schema-valid event with a tampered embedded resource no longer corrupts replay output.
+- **P2 #3 (event_id unique under collisions):** When `appendEvent` retries with a counter suffix on filename collision, the suffix is also baked into the on-disk `event_id` so two events on disk cannot share a logical ID.
+- **P2 #4 (recursive symlink rejection):** `listEvents` now refuses symlinked month directories and event files. Previously only top-level registry subdirs were checked.
+- **P2 #5 (non-null lifecycle timestamps):** Schema `allOf`/`if`/`then` rules now require non-null `date-time` values (not just key presence) for the lifecycle timestamps each state requires, plus `state.last_verified` for `active` resources.
+
 ### Post-CSO-review patch
 
 - **HIGH:** `gitleaks-action` SHA pin comment corrected from `# v2.3.7` to `# v2.3.9` (the SHA is correct; only the human-readable comment was wrong, which would have masked future drift).

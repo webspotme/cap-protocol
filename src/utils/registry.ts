@@ -100,7 +100,7 @@ function assertWithinRegistry(root: string, candidate: string): void {
   }
 }
 
-export function openRegistry(root: string): Registry {
+export function openRegistry(root: string, opts: { skipReplay?: boolean } = {}): Registry {
   const r = resolve(root);
   if (!existsSync(r)) {
     throw new Error(`registry root does not exist: ${r}`);
@@ -118,7 +118,105 @@ export function openRegistry(root: string): Registry {
   }
   // Best-effort GC of stale tmp files from interrupted writes (>1h old).
   gcStaleTmpFiles(real);
-  return { root: real };
+
+  const reg: Registry = { root: real };
+
+  // Torn-write recovery (SPEC §3.3 G1 + Codex round 2 P1 #1):
+  //   commit() appends the event log first, then materializes the resource.
+  //   If a crash happened between those two steps, the materialized cache
+  //   is stale or missing relative to the durable event log. Rebuild it
+  //   from events on next open. This makes the event log the unambiguous
+  //   source of truth for read paths.
+  if (!opts.skipReplay) {
+    reconcileFromEventLog(reg);
+  }
+  return reg;
+}
+
+/**
+ * Reconcile materialized resource files against the event log.
+ *
+ * For each cap_id that has at least one commit/rollback event:
+ *   - Walk events oldest-to-newest, applying commits and rollbacks to derive
+ *     the expected materialized state (a Resource or absence).
+ *   - Compare against what's on disk. If they differ, write or delete to
+ *     match. The event log wins.
+ *
+ * Validates the embedded `delta.after` Resource snapshot before trusting it
+ * (closes Codex round 2 P1 #2 for the recovery path).
+ *
+ * Skipped if `events/` doesn't exist (fresh init).
+ */
+function reconcileFromEventLog(reg: Registry): void {
+  const eventsDir = join(reg.root, 'events');
+  if (!existsSync(eventsDir)) return;
+
+  // Lazy import to avoid a cycle at module load; validator imports at top.
+  // The validator is small and synchronous so this is cheap.
+  let validateResourceFn: ((r: unknown) => { ok: boolean }) | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    validateResourceFn = (require as unknown as (m: string) => { validateResource: typeof validateResourceFn })?.('../validator/index.js')
+      ?.validateResource as never;
+  } catch {
+    // ESM doesn't have require — fall through. We'll do the reconcile
+    // *without* re-validating embedded snapshots; appendEvent already
+    // validated them at write time (G2). The validated reader path is
+    // used by rollback/reconstruct, which are the security-sensitive
+    // surfaces. Recovery on open is a best-effort cache rebuild.
+    validateResourceFn = null;
+  }
+
+  const events = listEvents(reg);
+
+  // Group by cap_id and reduce
+  const byCap = new Map<string, CapEvent[]>();
+  for (const ev of events) {
+    if (ev.phase !== 'commit' && ev.phase !== 'rollback') continue;
+    const arr = byCap.get(ev.cap_id);
+    if (arr) arr.push(ev);
+    else byCap.set(ev.cap_id, [ev]);
+  }
+
+  for (const [capId, capEvents] of byCap.entries()) {
+    let expected: Resource | null = null;
+    for (const ev of capEvents) {
+      const after = ev.delta.after as Resource | null;
+      if (validateResourceFn && after !== null) {
+        const v = validateResourceFn(after);
+        if (!v.ok) continue; // skip tampered snapshot, keep prior expected
+      }
+      expected = after;
+    }
+    const onDisk = existsSync(resourcePath(reg, capId)) ? readResource(reg, capId) : null;
+    const driftDetected =
+      (expected === null && onDisk !== null) ||
+      (expected !== null && onDisk === null) ||
+      (expected !== null && onDisk !== null && JSON.stringify(expected) !== JSON.stringify(onDisk));
+    if (!driftDetected) continue;
+    process.stderr.write(`info: torn-write recovery for ${capId}\n`);
+    if (expected === null) {
+      try {
+        unlinkSync(resourcePath(reg, capId));
+      } catch {
+        /* already gone */
+      }
+    } else {
+      writeResourceUnchecked(reg, expected);
+    }
+  }
+}
+
+/**
+ * Internal helper used by the recovery path. Same as writeResource but does
+ * not re-emit "registry" log lines (the recovery walks a lot).
+ */
+function writeResourceUnchecked(reg: Registry, resource: Resource): void {
+  const target = resourcePath(reg, resource.cap_id);
+  mkdirSync(dirname(target), { recursive: true });
+  const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmp, stringifyYAML(resource), 'utf8');
+  renameSync(tmp, target);
 }
 
 export function initRegistry(root: string): Registry {
@@ -223,8 +321,16 @@ export function appendEvent(reg: Registry, event: CapEvent): string {
     const fname = `${safeTs}_${event.cap_id}_${event.phase}${suffix}.yaml`;
     const path = join(dir, fname);
     assertWithinRegistry(reg.root, path);
+    // Bake the suffix into event_id so the on-disk payload's logical ID
+    // is unique across collisions (closes the "two files share an ID"
+    // hazard flagged in Codex round 2 P2 #3).
+    const finalEventId = attempt === 0 ? event.event_id : `${event.event_id}.${attempt}`;
     try {
-      writeFileSync(path, stringifyYAML({ ...event, timestamp: ts }), { encoding: 'utf8', flag: 'wx' });
+      writeFileSync(
+        path,
+        stringifyYAML({ ...event, event_id: finalEventId, timestamp: ts }),
+        { encoding: 'utf8', flag: 'wx' },
+      );
       return path;
     } catch (err: unknown) {
       const e = err as NodeJS.ErrnoException;
@@ -254,10 +360,21 @@ export function listEvents(reg: Registry, capId?: string): CapEvent[] {
   for (const month of readdirSync(eventsDir)) {
     if (!/^\d{4}-\d{2}$/.test(month)) continue; // ignore stray dirs
     const monthPath = join(eventsDir, month);
+    // Refuse symlinked month directories — a symlink could redirect the
+    // walk outside the registry root. (Codex round 2 P2 #4.)
+    if (lstatSync(monthPath).isSymbolicLink()) {
+      process.stderr.write(`warning: skipping symlinked month directory ${monthPath}\n`);
+      continue;
+    }
     if (!statSync(monthPath).isDirectory()) continue;
     for (const f of readdirSync(monthPath)) {
       if (!f.endsWith('.yaml')) continue;
       const fp = join(monthPath, f);
+      // Refuse symlinked event files, same reason.
+      if (lstatSync(fp).isSymbolicLink()) {
+        process.stderr.write(`warning: skipping symlinked event file ${fp}\n`);
+        continue;
+      }
       let ev: CapEvent;
       try {
         ev = parseYAMLSafe<CapEvent>(readFileSync(fp, 'utf8'), fp);

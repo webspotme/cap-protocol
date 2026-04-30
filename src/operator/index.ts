@@ -294,7 +294,11 @@ export async function rollback(
  * Reconstruct a resource's state at a given point in time by replaying events.
  * Implements `cap history <id> --at <ISO>` (SPEC §4.2).
  *
- * Uses the validated event reader — a tampered event will not affect replay.
+ * Uses the validated event reader AND validates each embedded resource
+ * snapshot (`delta.after`) before trusting it. The event schema only
+ * requires `delta.after` to be an object/null; the embedded Resource shape
+ * needs its own validation pass before any reader returns it as a trusted
+ * Resource. (Codex round 2 P1 #2.)
  */
 export async function reconstructAt(reg: Registry, capId: string, atISO: string): Promise<Resource | null> {
   const events = (await listEventsValidated(reg, capId)).filter(
@@ -302,10 +306,18 @@ export async function reconstructAt(reg: Registry, capId: string, atISO: string)
   );
   let current: Resource | null = null;
   for (const ev of events) {
-    if (ev.phase === 'commit') {
-      current = ev.delta.after as Resource;
-    } else if (ev.phase === 'rollback') {
-      current = ev.delta.after as Resource | null;
+    const after = ev.delta.after as Resource | null;
+    if (after !== null) {
+      const v = validateResource(after);
+      if (!v.ok) {
+        process.stderr.write(
+          `warning: skipping event ${ev.event_id} during reconstructAt — embedded resource fails validation\n`,
+        );
+        continue;
+      }
+    }
+    if (ev.phase === 'commit' || ev.phase === 'rollback') {
+      current = after;
     }
   }
   return current;

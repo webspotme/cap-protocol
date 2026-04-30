@@ -193,34 +193,116 @@
       "maxItems": 32
     }
   },
+  "$defs": {
+    "nonNullDateTime": { "type": "string", "format": "date-time" }
+  },
   "allOf": [
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "registered" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at"] } } }
+      "then": {
+        "properties": {
+          "lifecycle": {
+            "required": ["proposed_at", "registered_at"],
+            "properties": {
+              "registered_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "verified" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at"] } } }
+      "then": {
+        "properties": {
+          "lifecycle": {
+            "required": ["proposed_at", "registered_at", "verified_at"],
+            "properties": {
+              "registered_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "verified_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "active" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
+      "then": {
+        "properties": {
+          "state": {
+            "required": ["current", "since", "health", "last_verified"],
+            "properties": {
+              "last_verified": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          },
+          "lifecycle": {
+            "required": ["proposed_at", "registered_at", "verified_at", "activated_at"],
+            "properties": {
+              "registered_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "verified_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "activated_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "degraded" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
+      "then": {
+        "properties": {
+          "lifecycle": {
+            "required": ["proposed_at", "registered_at", "verified_at", "activated_at"],
+            "properties": {
+              "registered_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "verified_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "activated_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "recovered" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
+      "then": {
+        "properties": {
+          "lifecycle": {
+            "required": ["proposed_at", "registered_at", "verified_at", "activated_at"],
+            "properties": {
+              "registered_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "verified_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "activated_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "deprecated" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at", "deprecated_at"] } } }
+      "then": {
+        "properties": {
+          "lifecycle": {
+            "required": ["proposed_at", "registered_at", "verified_at", "activated_at", "deprecated_at"],
+            "properties": {
+              "registered_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "verified_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "activated_at": { "$ref": "#/$defs/nonNullDateTime" },
+              "deprecated_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "archived" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "archived_at"] } } }
+      "then": {
+        "properties": {
+          "lifecycle": {
+            "required": ["proposed_at", "archived_at"],
+            "properties": {
+              "archived_at": { "$ref": "#/$defs/nonNullDateTime" }
+            }
+          }
+        }
+      }
     }
   ]
 }
