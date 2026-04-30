@@ -71,6 +71,13 @@ Initial release.
 - Transitive dev-only CVE: GHSA-67mh-4wv8-2f99 in `esbuild` via `vitest@^2.1.0`. Dev-time only (not in `files` allow-list, not shipped to consumers). Tracked for vitest 4.x upgrade post-v0.1.0. (CSO Medium #2.)
 - v0.1.0 ships without a committed `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; CONTRIBUTING.md documents the workflow. (CSO Medium #1, partial.)
 
+### Post-Codex-round-4 patch
+
+- **HIGH (recovery uses unvalidated event reader):** `reconcileFromEventLog` now filters every event through `validateEvent` before honoring it, satisfying SPEC G5. Tampered/malformed events are dropped with a stderr warning instead of being trusted by the recovery materializer.
+- **MEDIUM (cross-cap_id materialization):** Recovery, `reconstructAt`, and `rollback` now refuse any event whose embedded `delta.after.cap_id` (or `delta.before.cap_id`) doesn't match the event's own `cap_id` field. Closes a hijack vector where a tampered commit event for cap_id=X could overwrite resource Y on recovery.
+- **LOW (SPEC G1 wording):** SPEC §3.3 G1 updated to match the post-round-3 opt-in recovery design — recovery may be invoked on demand via `cap verify --recover`, but consumers operating on a registry of unknown state MUST run recovery before any read.
+- **INFO:** Added regression tests: `recoverRegistry` reconciles a torn-write deleted resource; recovery refuses tampered cap_id-mismatch events.
+
 ### Post-Gemini-round-3 patch
 
 - **HIGH (cache-poisoning fail-open):** `reconcileFromEventLog` previously used CommonJS `require()` which is undefined in this ESM project. The validator load silently failed and recovery materialized embedded resource snapshots WITHOUT validation — exactly the fail-open Codex round 2 P1 #2 was meant to close. Switched to dynamic `await import('../validator/index.js')`, made `reconcileFromEventLog` and the new public `recoverRegistry` async.

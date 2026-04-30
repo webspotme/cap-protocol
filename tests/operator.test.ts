@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { stringify as stringifyYAMLTest } from 'yaml';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -168,6 +169,68 @@ describe('SEPL operator', () => {
     const p1 = appendEvent(reg, { ...baseEvent });
     const p2 = appendEvent(reg, { ...baseEvent });
     expect(p1).not.toBe(p2); // collision avoidance via counter suffix
+  });
+});
+
+describe('recoverRegistry — torn-write recovery + tamper resistance', () => {
+  let reg: Registry;
+  beforeEach(() => {
+    const root = mkdtempSync(join(tmpdir(), 'cap-test-recover-'));
+    reg = initRegistry(root);
+  });
+
+  it('reconciles a missing materialized resource from the event log', async () => {
+    const { recoverRegistry, readResource } = await import('../src/utils/registry.js');
+    const r = makeResource();
+    const p = propose(reg, r);
+    commit(reg, p.run_id);
+    // Simulate a torn write by manually deleting the materialized file
+    // *after* the commit event has been appended.
+    const path = join(reg.root, 'resources', `${r.cap_id}.yaml`);
+    unlinkSync(path);
+    expect(readResource(reg, r.cap_id)).toBeNull();
+    await recoverRegistry(reg);
+    const restored = readResource(reg, r.cap_id);
+    expect(restored).toEqual(r);
+  });
+
+  it('refuses to materialize a tampered event whose embedded cap_id differs from event.cap_id', async () => {
+    const { recoverRegistry, readResource } = await import('../src/utils/registry.js');
+    // Construct an attacker target resource on disk so recovery would have
+    // something to overwrite if the cap_id check were missing.
+    const r2 = makeResource({ cap_id: 'tool_attacker_target' });
+    const p2 = propose(reg, r2);
+    commit(reg, p2.run_id);
+    expect(readResource(reg, 'tool_attacker_target')?.what).toBe('A demo capability');
+    // Hand-write a tampered event: cap_id=tool_legit, but delta.after.cap_id=tool_attacker_target
+    const monthDir = join(reg.root, 'events', new Date().toISOString().slice(0, 7));
+    const tamperedAfter = makeResource({ cap_id: 'tool_attacker_target' });
+    tamperedAfter.what = 'HIJACKED';
+    const evilEv = {
+      event_id: 'tampered-event',
+      schema_version: 1,
+      cap_id: 'tool_legit',
+      operator: 'attacker',
+      phase: 'commit',
+      result: 'pass',
+      delta: {
+        before: null,
+        after: tamperedAfter,
+      },
+      auditable: true,
+      timestamp: new Date().toISOString(),
+    };
+    writeFileSync(
+      join(monthDir, 'zzz_tool_legit_commit_tampered.yaml'),
+      stringifyYAMLTest(evilEv),
+      'utf8',
+    );
+    // Run recovery — the cap_id mismatch must be caught and skipped.
+    await recoverRegistry(reg);
+    // tool_attacker_target should NOT be hijacked
+    const target = readResource(reg, 'tool_attacker_target');
+    expect(target?.what).toBe('A demo capability');
+    expect(target?.what).not.toBe('HIJACKED');
   });
 });
 

@@ -166,9 +166,24 @@ async function reconcileFromEventLog(reg: Registry): Promise<void> {
   if (!existsSync(eventsDir)) return;
 
   // Dynamic ESM import — works in both ESM and CJS contexts.
-  const { validateResource: validateResourceFn } = await import('../validator/index.js');
+  const { validateResource: validateResourceFn, validateEvent: validateEventFn } =
+    await import('../validator/index.js');
 
-  const events = listEvents(reg);
+  // Use the *validated* event list — every event must pass the event schema.
+  // Recovery is security-sensitive (its output is materialized to disk and
+  // then trusted by readResource) so we apply SPEC G5 here.
+  // Codex round 4 HIGH fix.
+  const allEvents = listEvents(reg);
+  const events = allEvents.filter((ev) => {
+    const v = validateEventFn(ev);
+    if (!v.ok) {
+      process.stderr.write(
+        `warning: skipping event ${ev.event_id} during recovery — fails event-schema validation\n`,
+      );
+      return false;
+    }
+    return true;
+  });
 
   // Group by cap_id and reduce
   const byCap = new Map<string, CapEvent[]>();
@@ -184,10 +199,22 @@ async function reconcileFromEventLog(reg: Registry): Promise<void> {
     for (const ev of capEvents) {
       const after = ev.delta.after as Resource | null;
       if (after !== null) {
+        // Validate the embedded Resource shape.
         const v = validateResourceFn(after);
         if (!v.ok) {
-          // Skip tampered snapshot — keep prior `expected` and continue.
-          // This means recovery NEVER materializes an invalid Resource.
+          process.stderr.write(
+            `warning: skipping event ${ev.event_id} during recovery — embedded resource fails validation\n`,
+          );
+          continue;
+        }
+        // Codex round 4 MEDIUM fix: refuse to materialize a resource under
+        // a different cap_id than the event claims. Without this, a
+        // tampered commit event with cap_id=X but delta.after.cap_id=Y
+        // could overwrite resource Y on recovery.
+        if (after.cap_id !== ev.cap_id) {
+          process.stderr.write(
+            `warning: skipping event ${ev.event_id} during recovery — embedded resource cap_id (${after.cap_id}) does not match event cap_id (${ev.cap_id})\n`,
+          );
           continue;
         }
       }

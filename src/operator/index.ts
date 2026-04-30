@@ -246,6 +246,13 @@ export async function rollback(
         `rollback refused: event ${eventId}.delta.before failed Resource validation (${v.issues.filter((i) => i.severity === 'error').length} errors)`,
       );
     }
+    // Defense-in-depth (Codex round 4 MEDIUM): refuse to restore a Resource
+    // with a different cap_id than the event refers to.
+    if (before.cap_id !== target.cap_id) {
+      throw new Error(
+        `rollback refused: event ${eventId}.delta.before.cap_id (${before.cap_id}) does not match event cap_id (${target.cap_id})`,
+      );
+    }
   }
 
   const now = new Date().toISOString();
@@ -320,6 +327,14 @@ export async function reconstructAt(reg: Registry, capId: string, atISO: string)
       if (!v.ok) {
         process.stderr.write(
           `warning: skipping event ${ev.event_id} during reconstructAt — embedded resource fails validation\n`,
+        );
+        continue;
+      }
+      // Defense-in-depth (Codex round 4 MEDIUM): refuse cap_id mismatch
+      // between the event and its embedded snapshot.
+      if (after.cap_id !== ev.cap_id) {
+        process.stderr.write(
+          `warning: skipping event ${ev.event_id} during reconstructAt — embedded resource cap_id (${after.cap_id}) does not match event cap_id (${ev.cap_id})\n`,
         );
         continue;
       }
