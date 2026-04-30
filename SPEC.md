@@ -216,6 +216,12 @@ cap-protocol does not specify the agent's planner. However, agents that consume 
 - The `commit` operator SHOULD require signed-off-by metadata in deployment scenarios.
 - Public registries SHOULD NOT include resources with `account` fields naming individuals or private organizations; use abstract roles (e.g., `service-account`) instead.
 
+### 5.4 Additional threat considerations
+
+- **`cap_id` collision / typosquatting.** Nothing in v0.x prevents two registries from registering the same `cap_id` with different semantics. Implementations that compose multiple registries SHOULD namespace incoming CAP_IDs (e.g., `<registry-name>::<cap_id>`) before merging. Future versions of this spec may introduce optional registry signing.
+- **YAML loader hardening.** Implementations MUST reject custom tags, anchor expansion bombs, and external-resource references at the YAML loader layer. The reference implementation uses `yaml.parse()` (not `parseDocument`), which is safe by default; consumers using a different YAML library are responsible for equivalent hardening.
+- **Schema poisoning.** A consumer MUST NOT fetch `schema/resource.schema.json` or `schema/event.schema.json` from a registry it is validating. Schemas are versioned in this repository (or any equivalent canonical source) and SHOULD be pinned by the consumer. Allowing a registry to serve its own validation schema would allow a hostile registry to relax its own validation.
+
 ## 6. Versioning of this specification
 
 This document is `v0.1`. Subsequent revisions will be tagged `vMAJOR.MINOR` and listed in `CHANGELOG.md`. The `schema_version` field of resources and events tracks schema-breaking changes independently from this document.

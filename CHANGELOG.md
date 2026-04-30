@@ -68,3 +68,13 @@ Initial release.
 **Known limitations carried into v0.1.0:**
 
 - `listEventsValidated` performs O(N) walk + validation across all events for `rollback` and `reconstructAt`. Acceptable for the v0.1 target scale (hundreds–low-thousands of resources). Future iterations should filter by `cap_id` at the filesystem level. (Gemini Minor #4 — graded acceptable for v0.x.)
+- Transitive dev-only CVE: GHSA-67mh-4wv8-2f99 in `esbuild` via `vitest@^2.1.0`. Dev-time only (not in `files` allow-list, not shipped to consumers). Tracked for vitest 4.x upgrade post-v0.1.0. (CSO Medium #2.)
+- v0.1.0 ships without a committed `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; CONTRIBUTING.md documents the workflow. (CSO Medium #1, partial.)
+
+### Post-CSO-review patch
+
+- **HIGH:** `gitleaks-action` SHA pin comment corrected from `# v2.3.7` to `# v2.3.9` (the SHA is correct; only the human-readable comment was wrong, which would have masked future drift).
+- **MEDIUM:** Added `.github/workflows/release.yml` — tag-triggered npm publish with `--provenance` (sigstore attestation), `id-token: write` permission, `production` GitHub environment for manual approval, smoke test that the built `dist/` actually loads, and tag-vs-package-version equality check.
+- **MEDIUM:** Added `npm run smoke` script (`node -e "require('./dist/index.js')"`) and chained it in `prepublishOnly` so manual publishes from a laptop also catch the dist/-not-built case.
+- **MEDIUM:** Added `.github/dependabot.yml` — weekly npm + github-actions updates, grouped by dev/runtime.
+- **INFO → SPEC §5.4:** Added explicit threat-model coverage for `cap_id` collision/typosquatting, YAML loader hardening, and schema poisoning (consumers MUST NOT fetch schema from the registry they are validating).
