@@ -22,7 +22,7 @@ npm run build
 3. **No secret material in test fixtures.** Use documented EXAMPLE keys (AWS provides `AKIAIOSFODNN7EXAMPLE`) or hand-crafted obviously-fake patterns. The repo's `.gitleaks.toml` allowlists known fixtures; add yours there if needed.
 4. **Pre-commit secret scan.** Install `gitleaks` locally and run `gitleaks detect --no-banner` before pushing.
 5. **Example registries are validated with `--strict-pii`.** Anything under `examples/*/` is run through `scripts/validate-registry.mjs` in CI with strict PII pattern matching enabled. Use abstract identifiers (`service-account`, `org-account`) rather than personal emails or named individuals.
-6. **Lockfile.** After your first local `npm install`, commit the generated `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; once committed, switch CI to `npm ci`.
+6. **Lockfile.** `package-lock.json` is committed; CI uses `npm ci` for reproducibility. If you add or update a dependency, commit the resulting lockfile change in the same PR.
 
 ## Pull request checklist
 

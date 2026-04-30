@@ -26,8 +26,8 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: npm
 
-      # Same install pattern as CI: works with or without lockfile.
-      - run: npm install --no-audit --no-fund
+      # `npm ci` for reproducibility — uses the committed package-lock.json.
+      - run: npm ci --no-audit --no-fund
 
       # Build, lint, typecheck, test — same gates as CI.
       - run: npm run typecheck
