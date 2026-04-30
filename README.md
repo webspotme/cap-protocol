@@ -4,7 +4,7 @@
 
 [![npm version](https://img.shields.io/npm/v/cap-protocol.svg)](https://www.npmjs.com/package/cap-protocol)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/webspot/cap-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/webspot/cap-protocol/actions)
+[![CI](https://github.com/webspotme/cap-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/webspotme/cap-protocol/actions)
 
 ## What it is
 
@@ -108,7 +108,7 @@ If cap-protocol helps your research or product, please cite:
   title  = {cap-protocol: A Capability Registry Layer for AI Agents},
   author = {Webspot},
   year   = {2026},
-  url    = {https://github.com/webspot/cap-protocol}
+  url    = {https://github.com/webspotme/cap-protocol}
 }
 ```
 

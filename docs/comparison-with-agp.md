@@ -45,7 +45,7 @@ If you use cap-protocol in a context where AGP comparison matters, please cite b
   title  = {cap-protocol: A Capability Registry Layer for AI Agents},
   author = {Webspot},
   year   = {2026},
-  url    = {https://github.com/webspot/cap-protocol}
+  url    = {https://github.com/webspotme/cap-protocol}
 }
 
 @misc{zhang2026autogenesisselfevolvingagentprotocol,

@@ -4,7 +4,7 @@ message: "If you use this software, please cite it using the metadata below."
 type: software
 authors:
   - name: Webspot
-repository-code: "https://github.com/webspot/cap-protocol"
+repository-code: "https://github.com/webspotme/cap-protocol"
 license: MIT
 version: 0.1.0
 date-released: 2026-04-30

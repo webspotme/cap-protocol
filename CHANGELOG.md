@@ -58,3 +58,13 @@ Initial release.
 - HEAD bump test.
 - appendEvent collision-avoidance test.
 - Schema bounds tests for `interface.inputs/outputs`.
+
+### Post-Gemini-review patch
+
+- **CRITICAL (G2 audit gap):** `rollback()` now appends the rollback event BEFORE materializing the prior state (mirroring the `commit()` ordering). Previously the resource was written/unlinked first, leaving an audit gap if `appendEvent` failed. Added regression test that asserts the rollback event is durably on disk.
+- **Schema lifecycle gaps:** `degraded` and `recovered` states now require the same lifecycle timestamps as `active` (proposed_at / registered_at / verified_at / activated_at). `deprecated` additionally requires the activation history. Closes a Medium finding from Gemini.
+- **SPEC diagram:** Added the `deprecated → active` (un-deprecate) edge to SPEC §2.4 to align with the implementation's `ALLOWED_TRANSITIONS`.
+
+**Known limitations carried into v0.1.0:**
+
+- `listEventsValidated` performs O(N) walk + validation across all events for `rollback` and `reconstructAt`. Acceptable for the v0.1 target scale (hundreds–low-thousands of resources). Future iterations should filter by `cap_id` at the filesystem level. (Gemini Minor #4 — graded acceptable for v0.x.)

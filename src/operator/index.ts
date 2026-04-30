@@ -232,26 +232,17 @@ export async function rollback(
 
   const before = target.delta.before as Resource | null;
 
-  // If `before` is non-null, validate it before writing as a Resource — a
-  // tampered event file could embed a malicious payload, and although
-  // listEventsValidated checks event-level schema, the embedded `before`
-  // is only loosely typed at the event schema layer.
+  // Pre-validate the embedded `before` payload BEFORE we write any event or
+  // touch the materialized resource. A tampered event file could embed a
+  // malicious payload, and although listEventsValidated checks event-level
+  // schema, the embedded `before` is only loosely typed at the event schema
+  // layer.
   if (before !== null) {
     const v = validateResource(before);
     if (!v.ok) {
       throw new Error(
         `rollback refused: event ${eventId}.delta.before failed Resource validation (${v.issues.filter((i) => i.severity === 'error').length} errors)`,
       );
-    }
-    writeResource(reg, before);
-  } else {
-    // Creation rollback: the prior state was absence. Delete the resource
-    // file so live state matches replay state (which returns null at this
-    // point in the timeline). This is the documented creation-rollback
-    // semantics — see SPEC §3.3 and docs/comparison-with-agp.md.
-    const path = join(reg.root, 'resources', `${target.cap_id}.yaml`);
-    if (existsSync(path)) {
-      unlinkSync(path);
     }
   }
 
@@ -272,7 +263,30 @@ export async function rollback(
   if (!validation.ok) {
     throw new Error(`internally generated rollback event failed validation: ${JSON.stringify(validation.issues)}`);
   }
-  appendEvent(reg, ev);
+
+  // Atomicity (mirrors commit() — SPEC §3.3 G2):
+  //   1. Append the rollback event with O_CREAT|O_EXCL. If we crash here,
+  //      no state has changed.
+  //   2. Materialize the prior resource state (write or unlink). If we
+  //      crash between 1 and 2, replay (`reconstructAt`) will return the
+  //      correct rolled-back state from the event log; the materialized
+  //      cache can be rebuilt on next open.
+  //
+  // The event log is the source of truth — auditable G2 requires that
+  // every materialized state change be preceded by a durable event.
+  appendEvent(reg, ev);            // step 1: durable audit record
+  if (before !== null) {
+    writeResource(reg, before);    // step 2: materialize prior state
+  } else {
+    // Creation rollback: prior state was absence. Delete the file so
+    // live state matches `reconstructAt` (which returns null at this
+    // point in the timeline).
+    const path = join(reg.root, 'resources', `${target.cap_id}.yaml`);
+    if (existsSync(path)) {
+      unlinkSync(path);
+    }
+  }
+
   return ev;
 }
 

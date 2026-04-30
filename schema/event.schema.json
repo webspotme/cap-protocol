@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/webspot/cap-protocol/schema/event.schema.json",
+  "$id": "https://github.com/webspotme/cap-protocol/schema/event.schema.json",
   "title": "cap-protocol Event",
   "description": "An append-only state-transition event in a cap-protocol registry. See SPEC.md §3.2.",
   "type": "object",

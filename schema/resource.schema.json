@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/webspot/cap-protocol/schema/resource.schema.json",
+  "$id": "https://github.com/webspotme/cap-protocol/schema/resource.schema.json",
   "title": "cap-protocol Resource",
   "description": "A single capability resource in a cap-protocol registry. See SPEC.md §2.",
   "type": "object",
@@ -207,8 +207,16 @@
       "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
     },
     {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "degraded" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
+    },
+    {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "recovered" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
+    },
+    {
       "if": { "properties": { "state": { "properties": { "current": { "const": "deprecated" } } } } },
-      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "deprecated_at"] } } }
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at", "deprecated_at"] } } }
     },
     {
       "if": { "properties": { "state": { "properties": { "current": { "const": "archived" } } } } },

@@ -9,8 +9,8 @@
     "agent-protocol",
     "agp"
   ],
-  "homepage": "https://github.com/webspot/cap-protocol",
-  "bugs": "https://github.com/webspot/cap-protocol/issues",
+  "homepage": "https://github.com/webspotme/cap-protocol",
+  "bugs": "https://github.com/webspotme/cap-protocol/issues",
   "license": "MIT",
   "author": "Webspot",
   "type": "module",
@@ -55,6 +55,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/webspot/cap-protocol.git"
+    "url": "git+https://github.com/webspotme/cap-protocol.git"
   }
 }

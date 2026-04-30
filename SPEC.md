@@ -77,11 +77,16 @@ lifecycle:
                                                                        │
                                                                   ┌────┼────┐
                                                                   ▼         ▼
-                                                              recovered  deprecated
-                                                                            │
-                                                                            ▼
-                                                                         archived
+                                                              recovered  deprecated ──┐
+                                                                            │         │
+                                                                            ▼         │
+                                                                         archived     │
+                                                                            ▲         │
+                                                                            │         │
+                                                                            └─ active ◀┘  (un-deprecate)
 ```
+
+The `deprecated → active` edge supports correcting a mistaken deprecation; this edge is also exercised by the rollback path.
 
 | State | Meaning |
 |---|---|

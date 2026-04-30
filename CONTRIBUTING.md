@@ -5,7 +5,7 @@ Thanks for considering a contribution!
 ## Quick start
 
 ```bash
-git clone https://github.com/webspot/cap-protocol.git
+git clone https://github.com/webspotme/cap-protocol.git
 cd cap-protocol
 npm install
 npm test

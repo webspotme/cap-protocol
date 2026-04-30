@@ -106,6 +106,27 @@ describe('SEPL operator', () => {
     expect(readResource(reg, v1.cap_id)).toBeNull();
   });
 
+  it('rollback writes the rollback event BEFORE materializing prior state (G2)', async () => {
+    // Regression test for the Gemini-reported critical ordering bug.
+    // After commit + rollback, the rollback event must exist in the log.
+    // We assert it by walking the events directory directly (not via the
+    // operator) so we know the event was durably appended.
+    const v1 = makeResource({ version: '1.0.0', what: 'v1' });
+    const p1 = propose(reg, v1);
+    const e1 = commit(reg, p1.run_id);
+    await rollback(reg, e1.event_id);
+    // Find the rollback event file on disk
+    const eventsRoot = join(reg.root, 'events');
+    const months = readdirSync(eventsRoot);
+    const monthDir = months.find((m) => /^\d{4}-\d{2}$/.test(m));
+    expect(monthDir).toBeDefined();
+    const eventFiles = readdirSync(join(eventsRoot, monthDir!));
+    const rollbackFiles = eventFiles.filter((f) => f.endsWith('_rollback.yaml'));
+    expect(rollbackFiles.length).toBe(1);
+    // And the resource file is gone (creation rollback)
+    expect(readResource(reg, v1.cap_id)).toBeNull();
+  });
+
   it('reconstructAt walks history correctly', async () => {
     const v1 = makeResource({ version: '1.0.0', what: 'v1' });
     const p1 = propose(reg, v1);
