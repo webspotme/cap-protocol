@@ -4,6 +4,8 @@
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
+// existsSync still used for proposal file existence checks; unlinkSync used in
+// creation-rollback path with ENOENT-tolerant try/catch (see rollback()).
 import { join } from 'node:path';
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml';
 import { randomUUID } from 'node:crypto';
@@ -280,10 +282,16 @@ export async function rollback(
   } else {
     // Creation rollback: prior state was absence. Delete the file so
     // live state matches `reconstructAt` (which returns null at this
-    // point in the timeline).
+    // point in the timeline). Use try/catch instead of existsSync+unlink
+    // to avoid a TOCTOU race with a concurrent recovery pass that may
+    // have already removed the file.
     const path = join(reg.root, 'resources', `${target.cap_id}.yaml`);
-    if (existsSync(path)) {
+    try {
       unlinkSync(path);
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== 'ENOENT') throw err;
+      // ENOENT — already gone, nothing to do
     }
   }
 

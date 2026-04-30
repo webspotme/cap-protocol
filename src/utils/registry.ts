@@ -100,7 +100,7 @@ function assertWithinRegistry(root: string, candidate: string): void {
   }
 }
 
-export function openRegistry(root: string, opts: { skipReplay?: boolean } = {}): Registry {
+export function openRegistry(root: string): Registry {
   const r = resolve(root);
   if (!existsSync(r)) {
     throw new Error(`registry root does not exist: ${r}`);
@@ -119,18 +119,28 @@ export function openRegistry(root: string, opts: { skipReplay?: boolean } = {}):
   // Best-effort GC of stale tmp files from interrupted writes (>1h old).
   gcStaleTmpFiles(real);
 
-  const reg: Registry = { root: real };
+  return { root: real };
+}
 
-  // Torn-write recovery (SPEC §3.3 G1 + Codex round 2 P1 #1):
-  //   commit() appends the event log first, then materializes the resource.
-  //   If a crash happened between those two steps, the materialized cache
-  //   is stale or missing relative to the durable event log. Rebuild it
-  //   from events on next open. This makes the event log the unambiguous
-  //   source of truth for read paths.
-  if (!opts.skipReplay) {
-    reconcileFromEventLog(reg);
-  }
-  return reg;
+/**
+ * Torn-write recovery — explicit, opt-in, async.
+ *
+ * Replays commit/rollback events oldest-to-newest, validates every embedded
+ * Resource snapshot against the schema, and reconciles the materialized
+ * resource cache so it matches what the event log says is current.
+ *
+ * Call this at startup if you want strong G1 atomicity guarantees on a
+ * registry that may have been left mid-commit by a crashed writer.
+ *
+ * Not called automatically by `openRegistry` because (a) it's O(N) over the
+ * whole event log and most CLI invocations don't need it, and (b) it's
+ * async and `openRegistry` is sync.
+ *
+ * The CLI invokes this from `cap verify --recover`. Library consumers
+ * SHOULD call it before any resource read on a registry of unknown state.
+ */
+export async function recoverRegistry(reg: Registry): Promise<void> {
+  await reconcileFromEventLog(reg);
 }
 
 /**
@@ -145,27 +155,18 @@ export function openRegistry(root: string, opts: { skipReplay?: boolean } = {}):
  * Validates the embedded `delta.after` Resource snapshot before trusting it
  * (closes Codex round 2 P1 #2 for the recovery path).
  *
+ * Async because we use a dynamic ESM `import()` to load the validator —
+ * `require` is undefined in ESM and the previous attempt to use it silently
+ * skipped validation (cache-poisoning fail-open caught by Gemini round 3).
+ *
  * Skipped if `events/` doesn't exist (fresh init).
  */
-function reconcileFromEventLog(reg: Registry): void {
+async function reconcileFromEventLog(reg: Registry): Promise<void> {
   const eventsDir = join(reg.root, 'events');
   if (!existsSync(eventsDir)) return;
 
-  // Lazy import to avoid a cycle at module load; validator imports at top.
-  // The validator is small and synchronous so this is cheap.
-  let validateResourceFn: ((r: unknown) => { ok: boolean }) | null = null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    validateResourceFn = (require as unknown as (m: string) => { validateResource: typeof validateResourceFn })?.('../validator/index.js')
-      ?.validateResource as never;
-  } catch {
-    // ESM doesn't have require — fall through. We'll do the reconcile
-    // *without* re-validating embedded snapshots; appendEvent already
-    // validated them at write time (G2). The validated reader path is
-    // used by rollback/reconstruct, which are the security-sensitive
-    // surfaces. Recovery on open is a best-effort cache rebuild.
-    validateResourceFn = null;
-  }
+  // Dynamic ESM import — works in both ESM and CJS contexts.
+  const { validateResource: validateResourceFn } = await import('../validator/index.js');
 
   const events = listEvents(reg);
 
@@ -182,9 +183,13 @@ function reconcileFromEventLog(reg: Registry): void {
     let expected: Resource | null = null;
     for (const ev of capEvents) {
       const after = ev.delta.after as Resource | null;
-      if (validateResourceFn && after !== null) {
+      if (after !== null) {
         const v = validateResourceFn(after);
-        if (!v.ok) continue; // skip tampered snapshot, keep prior expected
+        if (!v.ok) {
+          // Skip tampered snapshot — keep prior `expected` and continue.
+          // This means recovery NEVER materializes an invalid Resource.
+          continue;
+        }
       }
       expected = after;
     }
@@ -386,7 +391,15 @@ export function listEvents(reg: Registry, capId?: string): CapEvent[] {
       if (!capId || ev.cap_id === capId) out.push(ev);
     }
   }
-  out.sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? ''));
+  // Sort by timestamp, then by event_id as a stable tiebreaker for events
+  // that share the same millisecond (e.g., when the counter-suffix retry
+  // path generates two events for the same cap_id+phase+ms).
+  out.sort((a, b) => {
+    const ta = a.timestamp ?? '';
+    const tb = b.timestamp ?? '';
+    if (ta !== tb) return ta.localeCompare(tb);
+    return a.event_id.localeCompare(b.event_id);
+  });
   return out;
 }
 

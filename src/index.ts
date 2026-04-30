@@ -14,6 +14,7 @@ export {
 export {
   openRegistry,
   initRegistry,
+  recoverRegistry,
   readResource,
   writeResource,
   listResources,

@@ -71,6 +71,13 @@ Initial release.
 - Transitive dev-only CVE: GHSA-67mh-4wv8-2f99 in `esbuild` via `vitest@^2.1.0`. Dev-time only (not in `files` allow-list, not shipped to consumers). Tracked for vitest 4.x upgrade post-v0.1.0. (CSO Medium #2.)
 - v0.1.0 ships without a committed `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; CONTRIBUTING.md documents the workflow. (CSO Medium #1, partial.)
 
+### Post-Gemini-round-3 patch
+
+- **HIGH (cache-poisoning fail-open):** `reconcileFromEventLog` previously used CommonJS `require()` which is undefined in this ESM project. The validator load silently failed and recovery materialized embedded resource snapshots WITHOUT validation — exactly the fail-open Codex round 2 P1 #2 was meant to close. Switched to dynamic `await import('../validator/index.js')`, made `reconcileFromEventLog` and the new public `recoverRegistry` async.
+- **MEDIUM (O(N) cost on every CLI invocation):** Recovery is no longer automatic on `openRegistry`. It is now opt-in via `cap verify --recover` (CLI) or `await recoverRegistry(reg)` (library). Documentation: SPEC §3.3 G1 acknowledges that recovery is on-demand; library consumers SHOULD call `recoverRegistry` on a registry of unknown state before any read.
+- **LOW (rollback unlinkSync race):** Creation rollback now uses a try/catch with ENOENT tolerance instead of `existsSync` + `unlinkSync`. Closes the race with a concurrent recovery pass that may have already removed the file.
+- **MINOR (unstable sort):** `listEvents` now sorts by `(timestamp, event_id)` as a stable tiebreaker for events that share a millisecond.
+
 ### Post-Codex-round-2 patch
 
 - **P1 #1 (recovery from event log on open):** `openRegistry` now runs a torn-write reconciliation pass — replay commit/rollback events oldest-to-newest, validate each embedded resource, and align the materialized cache with the event log. Closes the gap where a crash between `appendEvent` and `writeResource` would leave `readResource`/`cap show` returning stale data forever. Pass `{ skipReplay: true }` to opt out (e.g., for migration tooling).

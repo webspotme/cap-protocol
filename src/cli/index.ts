@@ -13,6 +13,7 @@ const MAX_PROPOSAL_FILE_BYTES = 5_000_000;
 import {
   openRegistry,
   initRegistry,
+  recoverRegistry,
   readResource,
   listResources,
   listEvents,
@@ -179,8 +180,12 @@ program
   .description('Re-run schema + secret validation on resources (no behavior probes)')
   .requiredOption('-r, --root <path>', 'registry root')
   .option('--no-strict-pii', 'disable PII pattern warnings (default: on)')
-  .action((capIds: string[], opts: { root: string; strictPii: boolean }) => {
+  .option('--recover', 'replay event log and reconcile materialized cache before validating')
+  .action(async (capIds: string[], opts: { root: string; strictPii: boolean; recover?: boolean }) => {
     const reg = openRegistry(opts.root);
+    if (opts.recover) {
+      await recoverRegistry(reg);
+    }
     const ids = capIds.length > 0 ? capIds : listResources(reg);
     let okCount = 0;
     let failCount = 0;
