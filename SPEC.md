@@ -115,12 +115,13 @@ State transitions MUST be effected via a SEPL operation (§3) to ensure auditabi
 
 ### 3.1 Operator phases
 
-Every change to the registry passes through a four-phase pipeline:
+Every change to the registry passes through a five-phase pipeline:
 
 1. **propose** — produce a proposed delta against current state. No side effects on the live registry.
-2. **assess** — validate the proposal: schema, references, behavior probes. No side effects on the live registry.
-3. **commit** — apply the proposal: write resource files, append event log entries, bump HEAD.
-4. **rollback** — undo a previously committed event by writing a counter-event that restores the prior resource state.
+2. **assess** — validate the proposal: schema, references, behavior probes (probes are optional in the v0.x line). No side effects on the live registry.
+3. **commit** — apply the proposal in this order: (a) append the commit event with `O_CREAT|O_EXCL` to the event log, (b) atomic same-directory rename of the resource file into place, (c) bump `HEAD` if the resource version is higher than current `HEAD`. The event log is the source of truth; resource files are a materialized cache derived from it.
+4. **rollback** — undo a previously committed event. For non-creation rollbacks, the prior `Resource` state is written. For **creation rollbacks** (where `delta.before` was `null`), the resource file is deleted so live state matches event-replay state.
+5. **gc** — documented archival of old events. Implementations MAY garbage-collect events under archived resources after a grace period; gc itself produces an audit event.
 
 ### 3.2 Event record
 
@@ -147,10 +148,11 @@ parent_event: <event_id | null>   # for rollback events
 
 A conforming implementation MUST guarantee:
 
-- **G1 (Atomicity)** — A `commit` phase that fails partway leaves the registry in its pre-commit state. Implementations MAY use a staging directory + atomic rename; alternatives MUST achieve equivalent effect.
-- **G2 (Auditability)** — Every state transition has a corresponding Event record. The lifecycle field of any resource is reproducible by replaying its events.
-- **G3 (Reversibility)** — For every committed event there exists a `rollback` operation that restores the prior state of the affected resource(s) and writes a counter-event with `parent_event` pointing to the original.
-- **G4 (Append-only events)** — Event files MUST NOT be modified or deleted in normal operation. Garbage collection of archived events MAY occur after a grace period, but MUST be performed by a documented `gc` operation that itself produces an event.
+- **G1 (Atomicity)** — A `commit` phase that fails partway MUST leave the event log in a consistent state. Specifically: if the commit event was successfully appended, the change is durably recorded even if the materialized resource file write or HEAD bump fails. Implementations MUST be able to recover the materialized resource file by replaying the event log on next open.
+- **G2 (Auditability)** — Every state transition has a corresponding Event record. The lifecycle of any resource is reproducible by replaying its events. The event log is the source of truth; resource files are a materialized cache.
+- **G3 (Reversibility)** — For every committed event there exists a `rollback` operation that restores the prior state of the affected resource(s) and writes a counter-event with `parent_event` pointing to the original. For creation rollbacks, the resource file MUST be deleted so live state matches replay state.
+- **G4 (Append-only events)** — Event files MUST NOT be modified or deleted in normal operation. Implementations MUST use exclusive create (`O_CREAT|O_EXCL`) when writing event files to avoid silent overwrites under concurrent writers. Garbage collection of archived events MAY occur after a grace period, but MUST be performed by a documented `gc` operation that itself produces an event.
+- **G5 (Tamper detection)** — Implementations MUST validate event records against the event schema before trusting their contents (notably during rollback and replay). Tampered events that fail validation MUST be skipped with a warning rather than silently honored.
 
 ### 3.4 Optional capabilities
 

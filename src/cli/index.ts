@@ -5,9 +5,11 @@
  */
 
 import { Command } from 'commander';
-import { stringify as stringifyYAML } from 'yaml';
-import { readFileSync } from 'node:fs';
+import { stringify as stringifyYAML, parse as parseYAML } from 'yaml';
+import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+const MAX_PROPOSAL_FILE_BYTES = 5_000_000;
 import {
   openRegistry,
   initRegistry,
@@ -24,6 +26,7 @@ import {
   reconstructAt,
 } from '../operator/index.js';
 import { validateResource } from '../validator/index.js';
+// listResources, validateResource, readResource also used by `cap verify` below
 import type { Resource } from '../models/types.js';
 
 const program = new Command();
@@ -56,8 +59,12 @@ program
     const reg = openRegistry(opts.root);
     let candidate: Resource;
     if (opts.fromFile) {
-      const yaml = readFileSync(resolve(opts.fromFile), 'utf8');
-      candidate = parseYAMLOrThrow(yaml);
+      const path = resolve(opts.fromFile);
+      const size = statSync(path).size;
+      if (size > MAX_PROPOSAL_FILE_BYTES) {
+        throw new Error(`proposal file is ${size} bytes; max is ${MAX_PROPOSAL_FILE_BYTES}`);
+      }
+      candidate = parseYAML(readFileSync(path, 'utf8')) as Resource;
     } else {
       if (!opts.id || !opts.layer || !opts.source || !opts.what) {
         throw new Error('--id, --layer, --source, --what required when --from-file is not used');
@@ -89,11 +96,12 @@ program
   .command('assess <run_id>')
   .description('Validate a proposal against the live registry')
   .requiredOption('-r, --root <path>', 'registry root')
-  .option('--strict-pii', 'flag PII patterns as warnings (recommended for public registries)')
+  .option('--no-strict-pii', 'disable PII pattern warnings (default: on)')
   .option('--operator <name>', 'who is assessing', 'cli')
-  .action((runId: string, opts: { root: string; strictPii?: boolean; operator: string }) => {
+  .action((runId: string, opts: { root: string; strictPii: boolean; operator: string }) => {
+    // commander interprets `--no-strict-pii` as `strictPii: false` (default true)
     const reg = openRegistry(opts.root);
-    const report = assess(reg, runId, { operator: opts.operator, strictPII: opts.strictPii });
+    const report = assess(reg, runId, { operator: opts.operator, strictPII: opts.strictPii !== false });
     process.stdout.write(`result: ${report.result}\n`);
     if (report.issues.length > 0) {
       process.stdout.write(`issues:\n`);
@@ -107,10 +115,15 @@ program
   .description('Apply a proposal to the registry (atomic)')
   .requiredOption('-r, --root <path>', 'registry root')
   .option('-f, --force', 'commit even if assessment fails')
+  .option('--no-strict-pii', 'disable PII pattern warnings during commit re-assess (default: on)')
   .option('--operator <name>', 'who is committing', 'cli')
-  .action((runId: string, opts: { root: string; force?: boolean; operator: string }) => {
+  .action((runId: string, opts: { root: string; force?: boolean; strictPii: boolean; operator: string }) => {
     const reg = openRegistry(opts.root);
-    const ev = commit(reg, runId, { operator: opts.operator, force: opts.force });
+    const ev = commit(reg, runId, {
+      operator: opts.operator,
+      force: opts.force,
+      strictPII: opts.strictPii !== false,
+    });
     process.stdout.write(`${ev.event_id}\n`);
   });
 
@@ -119,9 +132,9 @@ program
   .description('Roll back a previously committed event')
   .requiredOption('-r, --root <path>', 'registry root')
   .option('--operator <name>', 'who is rolling back', 'cli')
-  .action((eventId: string, opts: { root: string; operator: string }) => {
+  .action(async (eventId: string, opts: { root: string; operator: string }) => {
     const reg = openRegistry(opts.root);
-    const ev = rollback(reg, eventId, { operator: opts.operator });
+    const ev = await rollback(reg, eventId, { operator: opts.operator });
     process.stdout.write(`${ev.event_id}\n`);
   });
 
@@ -144,10 +157,10 @@ program
   .description('Show event timeline for a resource')
   .requiredOption('-r, --root <path>', 'registry root')
   .option('--at <ISO>', 'reconstruct state as of this timestamp')
-  .action((capId: string, opts: { root: string; at?: string }) => {
+  .action(async (capId: string, opts: { root: string; at?: string }) => {
     const reg = openRegistry(opts.root);
     if (opts.at) {
-      const r = reconstructAt(reg, capId, opts.at);
+      const r = await reconstructAt(reg, capId, opts.at);
       if (!r) {
         process.stderr.write(`no committed state at ${opts.at}\n`);
         process.exit(1);
@@ -159,6 +172,35 @@ program
     for (const e of events) {
       process.stdout.write(`${e.timestamp ?? '?'}  ${e.phase.padEnd(8)} ${e.result.padEnd(4)} ${e.event_id}\n`);
     }
+  });
+
+program
+  .command('verify [cap_ids...]')
+  .description('Re-run schema + secret validation on resources (no behavior probes)')
+  .requiredOption('-r, --root <path>', 'registry root')
+  .option('--no-strict-pii', 'disable PII pattern warnings (default: on)')
+  .action((capIds: string[], opts: { root: string; strictPii: boolean }) => {
+    const reg = openRegistry(opts.root);
+    const ids = capIds.length > 0 ? capIds : listResources(reg);
+    let okCount = 0;
+    let failCount = 0;
+    for (const id of ids) {
+      const r = readResource(reg, id);
+      if (!r) {
+        process.stderr.write(`MISSING ${id}\n`);
+        failCount++;
+        continue;
+      }
+      const v = validateResource(r, { strictPII: opts.strictPii !== false });
+      if (!v.ok) {
+        process.stderr.write(`FAIL ${id}: ${v.issues.filter((i) => i.severity === 'error').map((i) => i.code).join(',')}\n`);
+        failCount++;
+      } else {
+        okCount++;
+      }
+    }
+    process.stdout.write(`verified ${okCount + failCount}: ${okCount} ok, ${failCount} fail\n`);
+    process.exit(failCount === 0 ? 0 : 1);
   });
 
 program
@@ -186,13 +228,6 @@ program
   .action((opts: { root: string }) => {
     process.stdout.write(`${readHead(openRegistry(opts.root))}\n`);
   });
-
-function parseYAMLOrThrow(yaml: string): Resource {
-  // Lazy import to keep CLI startup fast
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { parse } = require('yaml');
-  return parse(yaml) as Resource;
-}
 
 program.parseAsync().catch((err: Error) => {
   process.stderr.write(`error: ${err.message}\n`);

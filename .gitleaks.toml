@@ -6,14 +6,15 @@ title = "cap-protocol gitleaks config"
 [extend]
 useDefault = true
 
-# Allow obvious test fixtures: any "fake" key prefix used in tests/ must be
-# clearly recognizable as fake. We use AWS's documented EXAMPLE keys and
-# a hand-crafted "sk-ant-abcdefghijklmnopqrstuvwxyz12345" pattern.
+# Allow ONLY the exact fake fixtures used in tests. We deliberately do NOT
+# allowlist the entire tests/ path, because that would suppress real secrets
+# accidentally committed under tests/ in the future.
+#
+# If you add a new test fixture, add the exact regex here AND keep the
+# fixture clearly identifiable as fake (e.g., the AWS-documented EXAMPLE
+# pattern, or a "abcdef…" sequence).
 [allowlist]
-description = "test fixtures using documented EXAMPLE keys"
-paths = [
-  '''tests/.*''',
-]
+description = "test fixtures using documented or clearly-fake EXAMPLE keys"
 regexes = [
   '''AKIAIOSFODNN7EXAMPLE''',
   '''sk-ant-abcdefghijklmnopqrstuvwxyz12345''',

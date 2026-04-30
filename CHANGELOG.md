@@ -12,3 +12,49 @@ Initial release.
 - Optional PII pattern scanner for public registries (`--strict-pii`)
 - Public example registry under `examples/example-registry/`
 - CI: typecheck, lint, tests on Node 20 + 22, gitleaks secret scan, schema validation against example registry
+
+### Pre-release hardening (after independent security reviews)
+
+**Atomicity & correctness (Codex critical):**
+- `commit` is now transactional: append the commit event with `O_CREAT|O_EXCL` first (G1), then atomic same-directory rename of the resource file, then bump `HEAD`. The event log is the source of truth; resource files are a materialized cache. Documented in SPEC §3.1 and §3.3.
+- `appendEvent` uses `wx` (exclusive create) instead of `existsSync + rename` — closes the TOCTOU race that allowed event-log overwrites under concurrent writers.
+- Same-millisecond collisions now fall back to a counter-suffix file naming scheme (up to 1000 attempts before failing).
+- `rollback` of a creation commit deletes the resource file (matches `reconstructAt` returning null at that point in the timeline) instead of writing an `archived` resource. Documented as G3.
+- `commit` now bumps `HEAD` to the resource's version if it is higher than the current `HEAD`.
+
+**Tamper detection (Codex high):**
+- New `listEventsValidated` reader that validates every event against the schema before honoring it. Replay (`reconstructAt`) and `rollback` use the validated reader. Tampered events are dropped with a warning.
+- `rollback` additionally validates the embedded `delta.before` against the Resource schema before writing it back as a Resource.
+
+**Path-escape hardening (Codex high):**
+- `openRegistry` now refuses if any of `resources/`, `events/`, `manifests/`, `proposals/` is a symlink.
+- `appendEvent` validates the `cap_id`, `phase`, and `YYYY-MM` month-directory components and uses an internal `assertWithinRegistry` containment check.
+
+**Schema correctness (Codex medium):**
+- Resource schema now enforces lifecycle timestamps conditional on `state.current` via `allOf`/`if`/`then` — e.g., `state.current: active` requires `lifecycle.activated_at`.
+- Event schema requires `timestamp` (was optional) and constrains `auditable: const true` (was loose boolean).
+- `interface.inputs` / `interface.outputs` are bounded (max props, max length).
+
+**CLI & DX:**
+- `cap verify` command added (was advertised in SPEC §4.2 but unimplemented).
+- README examples now include `--root` flags everywhere.
+- `cap propose --from-file` uses the top-level ESM `parseYAML` import and rejects files >5 MB.
+- `assess` / `commit` / `verify` default to `--strict-pii=on`; pass `--no-strict-pii` to disable.
+
+**Hygiene:**
+- Tightened gitleaks allowlist — removed the `paths = ['''tests/.*''']` blanket exemption; only specific fake-key regexes are allowed.
+- CI: switched `npm ci` to `npm install --no-audit --no-fund` for pre-lockfile bootstrap; CONTRIBUTING.md documents the lockfile workflow.
+- GitHub Actions pinned to commit SHAs for supply-chain hardening.
+- Stale `*.tmp.<pid>.<ts>` files older than 1 hour are swept on `openRegistry`.
+
+**Privacy:**
+- `docs/case-study.md` rewritten as fully synthetic — removed all references to specific operational metrics, capability counts, and migration-incident narrative.
+- `docs/motivation.md` "Real-world scale" section generalized.
+
+**Tests added:**
+- 13 FSM transition tests (covers all allowed `proposed → registered → verified → active → degraded/recovered/deprecated → archived` plus rejected paths).
+- Path-traversal hardening tests.
+- Creation-rollback semantics test (live state matches replay state).
+- HEAD bump test.
+- appendEvent collision-avoidance test.
+- Schema bounds tests for `interface.inputs/outputs`.

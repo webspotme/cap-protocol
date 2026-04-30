@@ -144,3 +144,48 @@ describe('scanForSecrets', () => {
     expect(issues.some((i) => i.code === 'secret.aws_access_key')).toBe(true);
   });
 });
+
+describe('schema interface tightening (HIGH finding fix)', () => {
+  it('rejects an interface.outputs that is a 100KB string', () => {
+    const r = {
+      ...goodResource,
+      interface: { outputs: 'x'.repeat(100_000) },
+    };
+    const v = validateResource(r);
+    expect(v.ok).toBe(false);
+    expect(v.issues.some((i) => i.code.startsWith('schema.'))).toBe(true);
+  });
+
+  it('rejects an interface.inputs with too many keys', () => {
+    const inputs: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) inputs[`key_${i}`] = 'string';
+    const r = { ...goodResource, interface: { inputs } };
+    const v = validateResource(r);
+    expect(v.ok).toBe(false);
+  });
+
+  it('accepts a well-formed interface', () => {
+    const r = {
+      ...goodResource,
+      interface: {
+        inputs: {
+          file_path: { type: 'string', required: true, description: 'absolute path' },
+          limit: 'number',
+        },
+        outputs: 'file_contents | error',
+        side_effects: 'read-only' as const,
+      },
+    };
+    const v = validateResource(r);
+    expect(v.ok).toBe(true);
+  });
+
+  it('rejects unknown side_effects', () => {
+    const r = {
+      ...goodResource,
+      interface: { side_effects: 'world-writable' },
+    };
+    const v = validateResource(r);
+    expect(v.ok).toBe(false);
+  });
+});

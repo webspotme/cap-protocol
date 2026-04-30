@@ -12,7 +12,8 @@
     "phase",
     "result",
     "delta",
-    "auditable"
+    "auditable",
+    "timestamp"
   ],
   "additionalProperties": false,
   "properties": {
@@ -65,7 +66,8 @@
       }
     },
     "auditable": {
-      "type": "boolean"
+      "const": true,
+      "description": "Always true. Non-auditable events are not part of the protocol."
     },
     "parent_event": {
       "anyOf": [

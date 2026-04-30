@@ -1,51 +1,53 @@
-# Case study: scaling a capability registry to 3,000+ entries
+# Case study: scaling a capability registry
 
-This case study describes the practical experience that motivated cap-protocol. Specific service names, account identifiers, and source paths have been abstracted; the numbers are real.
+This case study is **synthetic**. It illustrates the kinds of pain that motivate cap-protocol and the kinds of changes adopters typically observe. It is not a report on any specific deployment.
 
-## The system
+## The pattern
 
-A long-running Claude Code-style agent connected to:
-- 30+ Claude Code native tools (Read, Write, Bash, Edit, Glob, Grep, Agent, Skill, plus deferred tools like ScheduleWakeup, CronCreate, etc.)
-- ~270 tools from 50+ MCP servers (filesystem, fetch, postgres, sqlite, github, browser automation, payment, email, voice, image generation, search, scheduling, etc.)
-- ~165 skills (PDF processing, spreadsheets, branding, design, integration helpers, debugging recipes)
-- ~58 slash commands and ~240 sub-agents (active and archived)
-- Hundreds of server-module functions, scripts, microservices, cron jobs, systemd units, Docker containers
-- ~190 API-key-unlocked surfaces (third-party integrations across payment, communication, social, design, voice, transcription, search, etc.)
+A long-running agent grows over time. It starts with a dozen native tools. Then someone adds an MCP server. Then a skill library. Then sub-agents. Then scheduled jobs. Then OAuth-connected integrations.
 
-Total: **3,065 capabilities across 38 layers.**
+After a year, the "tools the agent can call" list is no longer a list — it's a small graph with hundreds of nodes across many layers (native tools, MCP-served tools, skills, sub-agents, scheduled jobs, microservices, third-party integrations, access privileges).
 
-## The pre-protocol pain
+Without structure, the team running the agent hits a recognizable set of pains:
 
-Before adopting cap-protocol's structure (when capabilities lived in a flat 22,000-line markdown file):
+## Pre-protocol pain (illustrative)
 
-- **Onboarding new capabilities took ~20 minutes** of manual editing per capability — find the right section, copy the format, hope you didn't typo a field.
-- **Capability drift was invisible.** When a third-party integration deprecated an endpoint, the registry kept saying `status: active`. The first signal was a user-facing failure.
-- **Refresh was destructive.** `regenerate-capabilities.sh` rewrote the entire file, erasing any contextual comments, partial changes, and unreviewed additions.
-- **No rollback.** When a refresh introduced a bad entry, the only recovery was `git reset --hard` — which lost any other changes made in the interim.
-- **Audit was forensic.** "Was this capability registered when the bug happened?" required a `git log` walk and manual cross-reference with logs.
+- **Onboarding new capabilities is slow.** Each addition requires editing a flat config, hoping the format is right, and crossing fingers that the agent picks up the change.
+- **Capability drift is invisible.** When a third-party integration deprecates an endpoint, the registry keeps reporting healthy. The first signal is a user-facing failure.
+- **Refresh is destructive.** Regenerating the capability list rewrites the file, erasing contextual comments, partial changes, and unreviewed additions.
+- **No rollback.** When a refresh introduces a bad entry, recovery means `git reset --hard` — which loses any other in-flight changes.
+- **Audit is forensic.** "Was this capability registered when the bug happened?" requires a `git log` walk and manual cross-reference.
 
-## What changed
+## With cap-protocol (illustrative)
 
-After migrating to cap-protocol structure:
-
-| Metric | Before | After |
+| Concern | Before | After |
 |---|---|---|
-| Capability registration time | ~20 min manual | ~30 sec via `cap propose --from-file` |
+| Capability registration | manual edit | `cap propose --from-file` |
 | Drift detection | reactive (user-facing failure) | proactive (`cap verify` cron) |
 | Refresh granularity | whole-file rewrite | per-capability propose/assess/commit |
 | Rollback granularity | git reset (lossy) | per-event rollback (lossless) |
-| Audit query "what was active on date X?" | ~10 min forensic | `cap history <id> --at <date>` (sub-second) |
-| Registry file count | 1 monolithic | 3,065 per-resource YAMLs + event log |
-| Refresh duration | 4-7 minutes for full regen | 50-200ms per capability change |
+| Audit query "what was active on date X?" | git-log forensic | `cap history <id> --at <date>` |
+| Registry shape | single monolithic config | per-resource files + event log |
 
-## Lessons
+## Lessons that tend to apply
 
-1. **The migration was reversible.** During a 7-day soak the flat file remained the source of truth; the new registry was a parallel mirror. When we caught a schema edge case (the `archived` state needed an explicit transition path back to `active` for un-deprecation rollbacks), we fixed it in the schema and the migration script, then re-ran. Zero production impact.
+1. **Migration is usually reversible.** A side-by-side soak — old config remains source of truth while the new registry runs in parallel — lets teams catch schema edge cases without production impact.
 
-2. **The pre-commit secret scan caught real leaks.** During the migration, two CAP_IDs had partial API key fragments embedded in the `source` field (left over from a copy-paste during initial registration). The pattern scanner flagged them at `assess` time before the `commit` phase. Both were rotated and re-registered with proper env-var references.
+2. **Pre-commit secret scans catch real mistakes.** Even disciplined teams occasionally paste API key fragments into source paths during initial registration. The pattern scanner flags these at `assess` time before the `commit` phase.
 
-3. **The state machine prevented bad transitions.** Several proposals attempted to transition resources directly from `proposed` to `active` (a refresh shortcut). The FSM rejected them with a clear error pointing to the missing `verified` step.
+3. **State machines prevent bad transitions.** Proposals that try to skip the `verified` step and transition directly from `proposed` to `active` get rejected with a clear FSM error.
 
-4. **Per-capability semver pays off slowly but durably.** The first time an MCP server's API broke and we said "the v2.0.0 entry is failing health checks; transition to `degraded` and roll back the agent's bound version to v1.5.3" was the moment the version field stopped feeling like ceremony.
+4. **Per-capability semver pays off slowly but durably.** The first time you can say "the v2.0.0 entry is failing health checks; transition to `degraded` and pin the agent to v1.5.3" is the moment the version field stops feeling like ceremony.
 
-5. **Public registries need stricter hygiene than private ones.** When we considered open-sourcing the registry, the secret scan caught a long tail of soft-PII (email addresses in `account` fields, server hostnames in `source` paths) that was acceptable for an internal artifact but unacceptable for a public one. The `--strict-pii` flag exists because of that audit.
+5. **Public registries need stricter hygiene than private ones.** Patterns acceptable in a private registry (personal-style identifiers in `account` fields, hostnames in `source` paths) need abstraction before any public release. The `--strict-pii` flag exists for exactly this reason.
+
+## Where to go from here
+
+Adopt cap-protocol incrementally:
+
+1. Run `cap init` in your registry directory.
+2. For each capability you currently track, run `cap propose --from-file <yaml>` and `cap commit`.
+3. Add `cap verify` to a daily cron.
+4. Wire your agent's planner to filter on `state.current ∈ {active, degraded}`.
+
+You don't need to migrate everything at once. The protocol is designed to be additive.

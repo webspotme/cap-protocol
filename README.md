@@ -27,27 +27,31 @@ Today, agent systems built on MCP and A2A turn into spaghetti: flat lists of too
 npm install -g cap-protocol
 
 # Initialize a registry
-cap init my-agent-registry/
-cd my-agent-registry/
+cap init my-agent-registry
 
 # Propose a new capability
-cap propose --id tool_read \
+cap propose --root my-agent-registry \
+  --id tool_read \
   --layer cc-native \
   --source Read \
   --what "Read files from local filesystem"
+# → prints a run-id, e.g. 2026-04-30T07-42-00-000Z_a1b2c3d4
 
 # Validate the proposal (no side effects)
-cap assess proposals/<run-id>
+cap assess --root my-agent-registry <run-id>
 
 # Commit it (writes resource + event log entry)
-cap commit proposals/<run-id>
+cap commit --root my-agent-registry <run-id>
 
 # Inspect
-cap show tool_read
-cap history tool_read
+cap show --root my-agent-registry tool_read
+cap history --root my-agent-registry tool_read
+
+# Verify the whole registry against schema + secret/PII patterns
+cap verify --root my-agent-registry
 
 # Roll back if needed
-cap rollback <event-id>
+cap rollback --root my-agent-registry <event-id>
 ```
 
 ## How it relates to MCP / A2A / AGP

@@ -106,8 +106,42 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "inputs": { "type": "object" },
-        "outputs": {},
+        "inputs": {
+          "description": "Schema-shaped description of inputs. Bounded shallow object: keys are input names, values are short type descriptors. Not a JSON Schema document — keep it human-readable.",
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "string", "maxLength": 256 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "type": { "type": "string", "maxLength": 64 },
+                  "required": { "type": "boolean" },
+                  "description": { "type": "string", "maxLength": 256 }
+                }
+              }
+            ]
+          }
+        },
+        "outputs": {
+          "description": "Short string or shallow object describing outputs.",
+          "anyOf": [
+            { "type": "string", "maxLength": 1024 },
+            { "type": "null" },
+            {
+              "type": "object",
+              "maxProperties": 32,
+              "additionalProperties": {
+                "anyOf": [
+                  { "type": "string", "maxLength": 256 },
+                  { "type": "null" }
+                ]
+              }
+            }
+          ]
+        },
         "side_effects": { "type": "string", "enum": ["none", "read-only", "writes-local", "writes-remote", "irreversible"] }
       }
     },
@@ -158,5 +192,27 @@
       "uniqueItems": true,
       "maxItems": 32
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "registered" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at"] } } }
+    },
+    {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "verified" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at"] } } }
+    },
+    {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "active" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "registered_at", "verified_at", "activated_at"] } } }
+    },
+    {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "deprecated" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "deprecated_at"] } } }
+    },
+    {
+      "if": { "properties": { "state": { "properties": { "current": { "const": "archived" } } } } },
+      "then": { "properties": { "lifecycle": { "required": ["proposed_at", "archived_at"] } } }
+    }
+  ]
 }

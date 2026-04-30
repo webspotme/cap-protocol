@@ -44,9 +44,22 @@ export interface ResourceLifecycle {
   archived_at?: string | null;
 }
 
+export type InputDescriptor =
+  | string
+  | {
+      type?: string;
+      required?: boolean;
+      description?: string;
+    };
+
+export type OutputDescriptor =
+  | string
+  | null
+  | Record<string, string | null>;
+
 export interface ResourceInterface {
-  inputs?: Record<string, unknown>;
-  outputs?: unknown;
+  inputs?: Record<string, InputDescriptor>;
+  outputs?: OutputDescriptor;
   side_effects?: SideEffect;
 }
 

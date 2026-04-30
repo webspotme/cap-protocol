@@ -3,10 +3,11 @@
  * See SPEC.md §3.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml';
 import { randomUUID } from 'node:crypto';
+import semver from 'semver';
 import type {
   Resource,
   CapEvent,
@@ -25,7 +26,9 @@ import {
   readResource,
   writeResource,
   appendEvent,
-  listEvents,
+  listEventsValidated,
+  readHead,
+  writeHead,
 } from '../utils/registry.js';
 
 export interface Proposal {
@@ -148,20 +151,21 @@ export function assess(
 export function commit(
   reg: Registry,
   runId: string,
-  opts: { operator?: string; force?: boolean } = {},
+  opts: { operator?: string; force?: boolean; strictPII?: boolean } = {},
 ): CapEvent {
   const proposal = loadProposal(reg, runId);
 
-  // Re-assess at commit time (G1 — atomicity / consistency).
-  const assessment = assess(reg, runId, { operator: opts.operator });
+  // Re-assess at commit time (consistency check on the live registry).
+  const assessment = assess(reg, runId, { operator: opts.operator, strictPII: opts.strictPII });
   if (assessment.result === 'fail' && !opts.force) {
     throw new Error(
       `commit refused: assessment failed (${assessment.issues.filter((i) => i.severity === 'error').length} errors). Pass force:true to override.`,
     );
   }
 
+  const now = new Date().toISOString();
   const ev: CapEvent = {
-    event_id: `${new Date().toISOString().replace(/[:.]/g, '-')}_${proposal.cap_id}_commit`,
+    event_id: `${now.replace(/[:.]/g, '-')}_${proposal.cap_id}_commit`,
     schema_version: EVENT_SCHEMA_VERSION,
     cap_id: proposal.cap_id,
     operator: opts.operator ?? 'cli',
@@ -172,56 +176,88 @@ export function commit(
       after: proposal.after as unknown as Record<string, unknown>,
     },
     auditable: true,
+    timestamp: now,
   };
   const validation = validateEvent(ev);
   if (!validation.ok) {
     throw new Error(`internally generated commit event failed validation: ${JSON.stringify(validation.issues)}`);
   }
 
-  // Atomic resource write + event append
-  writeResource(reg, proposal.after);
-  appendEvent(reg, ev);
+  // Atomicity strategy (SPEC §3.3 G1):
+  //
+  //   1. Append the commit event using O_CREAT|O_EXCL. If we crash before
+  //      this step, no state has changed.
+  //   2. Write the resource via atomic same-directory rename. If we crash
+  //      between step 1 and step 2, the event log will have a commit event
+  //      that points to a resource state that wasn't yet materialized — but
+  //      `reconstructFromEvents` (the canonical replay path) will derive
+  //      the correct state from the event log on next open. The live
+  //      resource file may be reconstructed by an integrity-check pass.
+  //   3. Bump HEAD if the resource version is higher than current HEAD.
+  //      HEAD bump is non-essential for correctness — losing a HEAD bump
+  //      between step 2 and step 3 is recoverable from the event log.
+  //
+  // The event log is the source of truth; resource files are a materialized
+  // cache derived from it. This is the ONLY safe ordering: if we wrote the
+  // resource first and crashed before appending the event, the audit trail
+  // would be lost forever (G2 violation).
+
+  appendEvent(reg, ev);          // step 1: durably record the change
+  writeResource(reg, proposal.after); // step 2: materialize the new state
+  bumpHeadIfHigher(reg, proposal.after.version); // step 3: registry-level version bump
   return ev;
 }
 
-export function rollback(
+function bumpHeadIfHigher(reg: Registry, candidateVersion: string): void {
+  if (!semver.valid(candidateVersion)) return;
+  const current = readHead(reg);
+  if (!semver.valid(current) || semver.gt(candidateVersion, current)) {
+    writeHead(reg, candidateVersion);
+  }
+}
+
+export async function rollback(
   reg: Registry,
   eventId: string,
   opts: { operator?: string } = {},
-): CapEvent {
-  // Find the event being rolled back
-  const allEvents = listEvents(reg);
+): Promise<CapEvent> {
+  // Use the validated reader — rollback is security-sensitive: we will
+  // write delta.before back as a Resource, so we must trust the event.
+  const allEvents = await listEventsValidated(reg);
   const target = allEvents.find((e) => e.event_id === eventId);
-  if (!target) throw new Error(`event not found: ${eventId}`);
+  if (!target) throw new Error(`event not found or failed validation: ${eventId}`);
   if (target.phase !== 'commit') {
     throw new Error(`only commit events can be rolled back (this is a ${target.phase} event)`);
   }
 
-  // Restore the prior resource state
   const before = target.delta.before as Resource | null;
-  const after = target.delta.after as Resource;
 
-  if (before === null) {
-    // The original commit created the resource — rolling back means archiving.
-    // We don't physically delete the file (lineage preservation); we transition
-    // to `archived` state via the FSM.
-    const archived: Resource = {
-      ...after,
-      state: {
-        ...after.state,
-        current: 'archived',
-        since: new Date().toISOString(),
-        health: 'red',
-      },
-      lifecycle: { ...after.lifecycle, archived_at: new Date().toISOString() },
-    };
-    writeResource(reg, archived);
-  } else {
+  // If `before` is non-null, validate it before writing as a Resource — a
+  // tampered event file could embed a malicious payload, and although
+  // listEventsValidated checks event-level schema, the embedded `before`
+  // is only loosely typed at the event schema layer.
+  if (before !== null) {
+    const v = validateResource(before);
+    if (!v.ok) {
+      throw new Error(
+        `rollback refused: event ${eventId}.delta.before failed Resource validation (${v.issues.filter((i) => i.severity === 'error').length} errors)`,
+      );
+    }
     writeResource(reg, before);
+  } else {
+    // Creation rollback: the prior state was absence. Delete the resource
+    // file so live state matches replay state (which returns null at this
+    // point in the timeline). This is the documented creation-rollback
+    // semantics — see SPEC §3.3 and docs/comparison-with-agp.md.
+    const path = join(reg.root, 'resources', `${target.cap_id}.yaml`);
+    if (existsSync(path)) {
+      unlinkSync(path);
+    }
   }
 
+  const now = new Date().toISOString();
   const ev: CapEvent = {
-    event_id: `${new Date().toISOString().replace(/[:.]/g, '-')}_${target.cap_id}_rollback`,
+    event_id: `${now.replace(/[:.]/g, '-')}_${target.cap_id}_rollback`,
     schema_version: EVENT_SCHEMA_VERSION,
     cap_id: target.cap_id,
     operator: opts.operator ?? 'cli',
@@ -230,7 +266,12 @@ export function rollback(
     delta: { before: target.delta.after, after: target.delta.before },
     auditable: true,
     parent_event: target.event_id,
+    timestamp: now,
   };
+  const validation = validateEvent(ev);
+  if (!validation.ok) {
+    throw new Error(`internally generated rollback event failed validation: ${JSON.stringify(validation.issues)}`);
+  }
   appendEvent(reg, ev);
   return ev;
 }
@@ -238,9 +279,11 @@ export function rollback(
 /**
  * Reconstruct a resource's state at a given point in time by replaying events.
  * Implements `cap history <id> --at <ISO>` (SPEC §4.2).
+ *
+ * Uses the validated event reader — a tampered event will not affect replay.
  */
-export function reconstructAt(reg: Registry, capId: string, atISO: string): Resource | null {
-  const events = listEvents(reg, capId).filter(
+export async function reconstructAt(reg: Registry, capId: string, atISO: string): Promise<Resource | null> {
+  const events = (await listEventsValidated(reg, capId)).filter(
     (e) => (e.timestamp ?? '') <= atISO && (e.phase === 'commit' || e.phase === 'rollback'),
   );
   let current: Resource | null = null;

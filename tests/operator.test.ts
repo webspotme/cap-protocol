@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -77,7 +77,7 @@ describe('SEPL operator', () => {
     expect(() => commit(reg, p.run_id)).toThrow(/assessment failed/);
   });
 
-  it('rollback restores prior state', () => {
+  it('rollback restores prior state', async () => {
     // First commit: v1.0.0
     const v1 = makeResource({ version: '1.0.0', what: 'v1' });
     const p1 = propose(reg, v1);
@@ -87,12 +87,23 @@ describe('SEPL operator', () => {
     const p2 = propose(reg, v2);
     const e2 = commit(reg, p2.run_id);
     // Rollback the second commit
-    rollback(reg, e2.event_id);
+    await rollback(reg, e2.event_id);
     const restored = readResource(reg, v1.cap_id);
     expect(restored?.version).toBe('1.0.0');
     expect(restored?.what).toBe('v1');
     // First commit's event should still exist
     expect(e1.event_id).toBeTruthy();
+  });
+
+  it('rollback of creation deletes the resource (matches replay)', async () => {
+    const v1 = makeResource({ version: '1.0.0', what: 'v1' });
+    const p1 = propose(reg, v1);
+    const e1 = commit(reg, p1.run_id);
+    expect(readResource(reg, v1.cap_id)).not.toBeNull();
+    // Rollback the creation
+    await rollback(reg, e1.event_id);
+    // Live state should match replay state (which is null at the start of time)
+    expect(readResource(reg, v1.cap_id)).toBeNull();
   });
 
   it('reconstructAt walks history correctly', async () => {
@@ -107,9 +118,106 @@ describe('SEPL operator', () => {
     const p2 = propose(reg, v2);
     commit(reg, p2.run_id);
 
-    const past = reconstructAt(reg, v1.cap_id, t1);
+    const past = await reconstructAt(reg, v1.cap_id, t1);
     expect(past?.version).toBe('1.0.0');
   });
+
+  it('commit bumps HEAD when resource version is higher', () => {
+    const r = makeResource({ version: '2.5.0' });
+    const p = propose(reg, r);
+    commit(reg, p.run_id);
+    const headPath = join(reg.root, 'HEAD');
+    expect(readFileSync(headPath, 'utf8').trim()).toBe('2.5.0');
+  });
+
+  it('appendEvent uses exclusive create — same-ms collisions get unique filenames', async () => {
+    const { appendEvent } = await import('../src/utils/registry.js');
+    const ts = '2026-04-30T00:00:00.000Z';
+    const baseEvent = {
+      event_id: 'a',
+      schema_version: 1 as const,
+      cap_id: 'tool_demo',
+      operator: 'tester',
+      phase: 'commit' as const,
+      result: 'pass' as const,
+      delta: { before: null, after: null },
+      auditable: true,
+      timestamp: ts,
+    };
+    const p1 = appendEvent(reg, { ...baseEvent });
+    const p2 = appendEvent(reg, { ...baseEvent });
+    expect(p1).not.toBe(p2); // collision avoidance via counter suffix
+  });
+});
+
+describe('FSM transition coverage (Codex finding fix)', () => {
+  let reg: Registry;
+  beforeEach(() => {
+    const root = mkdtempSync(join(tmpdir(), 'cap-test-fsm-'));
+    reg = initRegistry(root);
+  });
+
+  // For each allowed transition, verify the operator accepts it.
+  const transitions: Array<[Parameters<typeof makeResource>[0]['state']['current'], Parameters<typeof makeResource>[0]['state']['current']]> = [
+    ['proposed', 'registered'],
+    ['proposed', 'rejected'],
+    ['registered', 'verified'],
+    ['registered', 'rejected'],
+    ['verified', 'active'],
+    ['verified', 'rejected'],
+    ['active', 'degraded'],
+    ['active', 'deprecated'],
+    ['degraded', 'recovered'],
+    ['degraded', 'deprecated'],
+    ['recovered', 'active'],
+    ['deprecated', 'archived'],
+    ['deprecated', 'active'],
+  ] as const as Array<[any, any]>;
+
+  for (const [from, to] of transitions) {
+    it(`accepts ${from} -> ${to}`, () => {
+      // First commit: a resource with `from` state
+      const r1 = makeResourceForState(from);
+      const p1 = propose(reg, r1);
+      commit(reg, p1.run_id, { force: true });
+      // Second commit: same cap_id, transition to `to`
+      const r2 = { ...r1, state: { ...r1.state, current: to, since: new Date().toISOString() } };
+      // Bump version to trigger schema-required lifecycle timestamps if relevant
+      const r2WithLifecycle = ensureLifecycleForState(r2, to);
+      const p2 = propose(reg, r2WithLifecycle);
+      const a = assess(reg, p2.run_id);
+      expect(a.result).not.toBe('fail');
+    });
+  }
+});
+
+function makeResourceForState(state: string): Resource {
+  const now = new Date().toISOString();
+  const r = makeResource();
+  r.state = { ...r.state, current: state as Resource['state']['current'], since: now };
+  return ensureLifecycleForState(r, state);
+}
+
+function ensureLifecycleForState(r: Resource, state: string): Resource {
+  const now = new Date().toISOString();
+  const lc = { ...r.lifecycle };
+  if (['registered', 'verified', 'active', 'degraded', 'recovered', 'deprecated', 'archived'].includes(state)) {
+    lc.registered_at = lc.registered_at ?? now;
+  }
+  if (['verified', 'active', 'degraded', 'recovered', 'deprecated', 'archived'].includes(state)) {
+    lc.verified_at = lc.verified_at ?? now;
+  }
+  if (['active', 'degraded', 'recovered', 'deprecated', 'archived'].includes(state)) {
+    lc.activated_at = lc.activated_at ?? now;
+  }
+  if (state === 'deprecated' || state === 'archived') {
+    lc.deprecated_at = lc.deprecated_at ?? now;
+  }
+  if (state === 'archived') {
+    lc.archived_at = lc.archived_at ?? now;
+  }
+  return { ...r, lifecycle: lc };
+}
 
   it('appends events in append-only fashion (no duplicate filenames)', () => {
     const r = makeResource();
@@ -118,5 +226,48 @@ describe('SEPL operator', () => {
     const eventsRoot = join(reg.root, 'events');
     const months = readdirSync(eventsRoot);
     expect(months.length).toBeGreaterThan(0);
+  });
+});
+
+describe('appendEvent path-traversal hardening (MEDIUM finding fix)', () => {
+  let reg: Registry;
+  beforeEach(() => {
+    const root = mkdtempSync(join(tmpdir(), 'cap-test-trav-'));
+    reg = initRegistry(root);
+  });
+
+  it('rejects events whose timestamp does not start with YYYY-MM', async () => {
+    // Direct call to appendEvent with a malicious timestamp prefix
+    const { appendEvent } = await import('../src/utils/registry.js');
+    expect(() =>
+      appendEvent(reg, {
+        event_id: 'evil',
+        schema_version: 1,
+        cap_id: 'tool_demo',
+        operator: 'tester',
+        phase: 'commit',
+        result: 'pass',
+        delta: { before: null, after: null },
+        auditable: true,
+        timestamp: '../etc',
+      }),
+    ).toThrow(/invalid timestamp prefix/);
+  });
+
+  it('rejects events with cap_id containing path separators', async () => {
+    const { appendEvent } = await import('../src/utils/registry.js');
+    expect(() =>
+      appendEvent(reg, {
+        event_id: 'evil',
+        schema_version: 1,
+        cap_id: '../../../etc/passwd' as unknown as string,
+        operator: 'tester',
+        phase: 'commit',
+        result: 'pass',
+        delta: { before: null, after: null },
+        auditable: true,
+        timestamp: '2026-04-30T00:00:00Z',
+      }),
+    ).toThrow(/invalid cap_id/);
   });
 });

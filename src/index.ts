@@ -19,8 +19,10 @@ export {
   listResources,
   appendEvent,
   listEvents,
+  listEventsValidated,
   readHead,
   writeHead,
+  RegistryParseError,
   type Registry,
 } from './utils/registry.js';
 export {

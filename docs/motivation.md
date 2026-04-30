@@ -37,8 +37,8 @@ cap-protocol's append-only event log captures every transition with a timestamp,
 
 These layers do not compete. They stack.
 
-## Real-world scale
+## Scale considerations
 
-The reference implementation was developed against a registry of **3,065 CAP_IDs** across 38 layers (Claude Code native tools, MCP servers, skills, sub-agents, server modules, scripts, microservices, cron jobs, Docker containers, systemd units, OAuth-unlocked surfaces, and access privileges). The schemas, FSM, and operator semantics in this repo are battle-tested at that scale.
+The protocol and reference implementation are designed for registries with hundreds to low thousands of resources spanning many layers (native tools, MCP servers, skills, sub-agents, scheduled jobs, integrations, access privileges).
 
-The public example registry at `examples/example-registry/` is a reduced subset of public/generic capabilities for illustration.
+The public example registry at `examples/example-registry/` is a small illustrative subset of public capabilities. Adopters add their own resources through the standard `propose / assess / commit` flow.

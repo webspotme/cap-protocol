@@ -21,6 +21,8 @@ npm run build
 2. **Tests are required.** New code paths need tests in `tests/`. Run `npm test` locally before opening a PR.
 3. **No secret material in test fixtures.** Use documented EXAMPLE keys (AWS provides `AKIAIOSFODNN7EXAMPLE`) or hand-crafted obviously-fake patterns. The repo's `.gitleaks.toml` allowlists known fixtures; add yours there if needed.
 4. **Pre-commit secret scan.** Install `gitleaks` locally and run `gitleaks detect --no-banner` before pushing.
+5. **Example registries are validated with `--strict-pii`.** Anything under `examples/*/` is run through `scripts/validate-registry.mjs` in CI with strict PII pattern matching enabled. Use abstract identifiers (`service-account`, `org-account`) rather than personal emails or named individuals.
+6. **Lockfile.** After your first local `npm install`, commit the generated `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; once committed, switch CI to `npm ci`.
 
 ## Pull request checklist
 
