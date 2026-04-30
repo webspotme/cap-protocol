@@ -1,0 +1,24 @@
+cap_id: tool_tool_search
+schema_version: 1
+layer: cc-native
+source: ToolSearch
+what: Resolve deferred tool schemas so they become callable
+account: service-account
+state:
+  current: active
+  since: 2026-04-30T00:00:00Z
+  health: green
+  last_verified: 2026-04-30T00:00:00Z
+  verifier: cap-protocol-example-generator
+lifecycle:
+  proposed_by: cap-protocol-example-generator
+  proposed_at: 2026-04-30T00:00:00Z
+  registered_at: 2026-04-30T00:00:00Z
+  verified_at: 2026-04-30T00:00:00Z
+  activated_at: 2026-04-30T00:00:00Z
+  deprecated_at: null
+  archived_at: null
+version: 1.0.0
+provenance:
+  added_by: cap-protocol-example-generator
+  evidence: public documentation (Anthropic CC docs / MCP server READMEs / anthropic/example-skills)

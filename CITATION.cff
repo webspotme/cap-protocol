@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+title: "cap-protocol: A Capability Registry Layer for AI Agents"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+authors:
+  - name: Webspot
+repository-code: "https://github.com/webspot/cap-protocol"
+license: MIT
+version: 0.1.0
+date-released: 2026-04-30
+references:
+  - type: article
+    title: "Autogenesis: A Self-Evolving Agent Protocol"
+    authors:
+      - given-names: Wentao
+        family-names: Zhang
+      - given-names: Zhe
+        family-names: Zhao
+      - given-names: Haibin
+        family-names: Wen
+      - given-names: Yingcheng
+        family-names: Wu
+      - given-names: Ming
+        family-names: Yin
+      - given-names: Bo
+        family-names: An
+      - given-names: Mengdi
+        family-names: Wang
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2604.15034"
+    notes: "Source for the two-layer (RSPL/SEPL) architecture; cap-protocol is a practitioner subset."

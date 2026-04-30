@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage/
+.vscode/
+.idea/
+*.tsbuildinfo
+
+# Local development registries
+local-registry/
+*.local-registry/
+proposals/
+
+# Pre-commit secret scan reports
+.secrets-baseline

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/webspot/cap-protocol/schema/event.schema.json",
+  "title": "cap-protocol Event",
+  "description": "An append-only state-transition event in a cap-protocol registry. See SPEC.md §3.2.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "schema_version",
+    "cap_id",
+    "operator",
+    "phase",
+    "result",
+    "delta",
+    "auditable"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Globally unique. Recommended format: <ISO-timestamp>_<cap_id>_<phase>"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "cap_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,127}$"
+    },
+    "operator": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Who or what performed this transition (CLI user, automation name, etc.)."
+    },
+    "phase": {
+      "enum": ["propose", "assess", "commit", "rollback", "gc"]
+    },
+    "result": {
+      "enum": ["pass", "fail", "warn"]
+    },
+    "delta": {
+      "type": "object",
+      "required": ["before", "after"],
+      "additionalProperties": false,
+      "properties": {
+        "before": { "type": ["object", "null"] },
+        "after":  { "type": ["object", "null"] }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validator_run_id": { "type": "string", "maxLength": 128 },
+        "evidence_files": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 1024 },
+          "maxItems": 32
+        },
+        "notes": { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "auditable": {
+      "type": "boolean"
+    },
+    "parent_event": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "maxLength": 256 },
+        { "type": "null" }
+      ],
+      "description": "Set on rollback events to point to the original event being undone."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

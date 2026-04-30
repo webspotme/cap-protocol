@@ -1,0 +1,60 @@
+{
+  "name": "cap-protocol",
+  "version": "0.1.0",
+  "description": "A capability registry layer for AI agents — versioned, lifecycle-aware, auditable.",
+  "keywords": [
+    "ai-agents",
+    "mcp",
+    "capability-registry",
+    "agent-protocol",
+    "agp"
+  ],
+  "homepage": "https://github.com/webspot/cap-protocol",
+  "bugs": "https://github.com/webspot/cap-protocol/issues",
+  "license": "MIT",
+  "author": "Webspot",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cap": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "SPEC.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.6.0",
+    "commander": "^12.1.0",
+    "semver": "^7.6.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/semver": "^7.5.8",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "eslint": "^9.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/webspot/cap-protocol.git"
+  }
+}
