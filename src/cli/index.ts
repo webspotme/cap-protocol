@@ -184,7 +184,10 @@ program
   .action(async (capIds: string[], opts: { root: string; strictPii: boolean; recover?: boolean }) => {
     const reg = openRegistry(opts.root);
     if (opts.recover) {
-      await recoverRegistry(reg);
+      const report = await recoverRegistry(reg);
+      process.stdout.write(
+        `recover: ${report.reconciled.length} reconciled, ${report.warnings.length} warnings\n`,
+      );
     }
     const ids = capIds.length > 0 ? capIds : listResources(reg);
     let okCount = 0;

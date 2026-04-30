@@ -25,6 +25,7 @@ export {
   writeHead,
   RegistryParseError,
   type Registry,
+  type RecoveryReport,
 } from './utils/registry.js';
 export {
   propose,

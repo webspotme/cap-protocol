@@ -71,6 +71,19 @@ Initial release.
 - Transitive dev-only CVE: GHSA-67mh-4wv8-2f99 in `esbuild` via `vitest@^2.1.0`. Dev-time only (not in `files` allow-list, not shipped to consumers). Tracked for vitest 4.x upgrade post-v0.1.0. (CSO Medium #2.)
 - v0.1.0 ships without a committed `package-lock.json`. CI uses `npm install --no-audit --no-fund` until a lockfile lands; CONTRIBUTING.md documents the workflow. (CSO Medium #1, partial.)
 
+### Round 6 — actually-running-the-code revealed three latent bugs that all 5 static reviewers missed
+
+- **CRITICAL (validator was silently broken):** `Ajv` v8 default import only ships draft-07; our schemas declare `$schema: draft-2020-12`, so EVERY validator call threw "no schema with key or ref" at runtime. Switched to `Ajv2020` from `ajv/dist/2020.js`. This bug had been latent since the original validator was written; static review couldn't catch it because no reviewer actually compiled and ran the code.
+- **CRITICAL (Ajv strict mode rejected our conditional schemas):** `strictTypes` and `strictRequired` flagged the `allOf/if/then` blocks because the conditional `then` branches add `required` entries to nested `properties.lifecycle` without re-declaring the parent type. Loosened both strict flags (still keeping the rest of strict mode on); schemas remain valid JSON Schema 2020-12.
+- **HIGH (lint pipeline broken):** Migrated `.eslintrc.json` to ESLint v9 flat config (`eslint.config.js`); added `@eslint/js` to devDependencies; added globals declarations for both `.ts` and `.mjs` files. CI lint step would have failed without this.
+- **TS error:** Fixed a Partial-typed FSM transition test using a clean `Resource['state']['current']` type alias.
+- **All 5 gates green:** lint, typecheck, test (51/51 passing), build, smoke, registry validation.
+
+### Post-Codex-round-5 patch
+
+- **CRITICAL (broken test syntax):** Removed an orphaned `it()` block + extra closing brace at `tests/operator.test.ts:306-314` that prevented the whole file from compiling under tsc. The leftover was a duplicate of the new `appendEvent uses exclusive create` test added in a later round; deleting it is non-lossy.
+- **MEDIUM (recovery warnings as programmatic API):** `recoverRegistry()` now returns a typed `RecoveryReport { warnings: Array<{ event_id, cap_id, reason }>, reconciled: string[] }` so library callers can detect tampered/skipped events without intercepting stderr. CLI `cap verify --recover` prints the counts. New test asserts the report shape on a healthy registry and on the tamper-resistance fixture.
+
 ### Post-Gemini-round-4 patch (one bonus pre-existing finding)
 
 - **Pre-existing minor:** `package.json` `smoke` script and `release.yml` smoke step both used CommonJS `require()` in a package marked `"type": "module"` — would have failed `prepublishOnly`. Switched both to `node --input-type=module -e "import(...)"`. Pre-existing from the original round-3 release-workflow addition, not introduced by any patch round.

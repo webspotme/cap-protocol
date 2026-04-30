@@ -139,8 +139,8 @@ export function openRegistry(root: string): Registry {
  * The CLI invokes this from `cap verify --recover`. Library consumers
  * SHOULD call it before any resource read on a registry of unknown state.
  */
-export async function recoverRegistry(reg: Registry): Promise<void> {
-  await reconcileFromEventLog(reg);
+export async function recoverRegistry(reg: Registry): Promise<RecoveryReport> {
+  return reconcileFromEventLog(reg);
 }
 
 /**
@@ -161,9 +161,17 @@ export async function recoverRegistry(reg: Registry): Promise<void> {
  *
  * Skipped if `events/` doesn't exist (fresh init).
  */
-async function reconcileFromEventLog(reg: Registry): Promise<void> {
+export interface RecoveryReport {
+  /** Events skipped because they failed schema or content checks. */
+  warnings: Array<{ event_id: string; cap_id: string; reason: string }>;
+  /** cap_ids whose materialized files were rewritten or deleted to match the log. */
+  reconciled: string[];
+}
+
+async function reconcileFromEventLog(reg: Registry): Promise<RecoveryReport> {
+  const report: RecoveryReport = { warnings: [], reconciled: [] };
   const eventsDir = join(reg.root, 'events');
-  if (!existsSync(eventsDir)) return;
+  if (!existsSync(eventsDir)) return report;
 
   // Dynamic ESM import — works in both ESM and CJS contexts.
   const { validateResource: validateResourceFn, validateEvent: validateEventFn } =
@@ -177,9 +185,9 @@ async function reconcileFromEventLog(reg: Registry): Promise<void> {
   const events = allEvents.filter((ev) => {
     const v = validateEventFn(ev);
     if (!v.ok) {
-      process.stderr.write(
-        `warning: skipping event ${ev.event_id} during recovery — fails event-schema validation\n`,
-      );
+      const reason = `fails event-schema validation`;
+      report.warnings.push({ event_id: ev.event_id, cap_id: ev.cap_id, reason });
+      process.stderr.write(`warning: skipping event ${ev.event_id} during recovery — ${reason}\n`);
       return false;
     }
     return true;
@@ -202,9 +210,9 @@ async function reconcileFromEventLog(reg: Registry): Promise<void> {
         // Validate the embedded Resource shape.
         const v = validateResourceFn(after);
         if (!v.ok) {
-          process.stderr.write(
-            `warning: skipping event ${ev.event_id} during recovery — embedded resource fails validation\n`,
-          );
+          const reason = `embedded resource fails validation`;
+          report.warnings.push({ event_id: ev.event_id, cap_id: ev.cap_id, reason });
+          process.stderr.write(`warning: skipping event ${ev.event_id} during recovery — ${reason}\n`);
           continue;
         }
         // Codex round 4 MEDIUM fix: refuse to materialize a resource under
@@ -212,9 +220,9 @@ async function reconcileFromEventLog(reg: Registry): Promise<void> {
         // tampered commit event with cap_id=X but delta.after.cap_id=Y
         // could overwrite resource Y on recovery.
         if (after.cap_id !== ev.cap_id) {
-          process.stderr.write(
-            `warning: skipping event ${ev.event_id} during recovery — embedded resource cap_id (${after.cap_id}) does not match event cap_id (${ev.cap_id})\n`,
-          );
+          const reason = `embedded resource cap_id (${after.cap_id}) does not match event cap_id (${ev.cap_id})`;
+          report.warnings.push({ event_id: ev.event_id, cap_id: ev.cap_id, reason });
+          process.stderr.write(`warning: skipping event ${ev.event_id} during recovery — ${reason}\n`);
           continue;
         }
       }
@@ -236,7 +244,9 @@ async function reconcileFromEventLog(reg: Registry): Promise<void> {
     } else {
       writeResourceUnchecked(reg, expected);
     }
+    report.reconciled.push(capId);
   }
+  return report;
 }
 
 /**

@@ -3,7 +3,11 @@
  * Implements SPEC §4.1 (schema) and §5.2 (secret hygiene pre-check).
  */
 
-import Ajv, { type ValidateFunction } from 'ajv';
+// Use the draft-2020-12 entry point so the metaschema referenced by our
+// schema files (`"$schema": "https://json-schema.org/draft/2020-12/schema"`)
+// is loaded. The default `ajv` import only ships draft-07.
+import Ajv2020 from 'ajv/dist/2020.js';
+import type { ValidateFunction } from 'ajv';
 import addFormats from 'ajv-formats';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +29,18 @@ function getValidators() {
   if (_resourceValidate && _eventValidate) {
     return { resource: _resourceValidate, event: _eventValidate };
   }
-  const ajv = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true });
+  // strictTypes / strictRequired are turned off because our `allOf/if/then`
+  // conditionals describe nested `properties.lifecycle` blocks that add
+  // `required` entries without redeclaring the parent `properties.lifecycle`
+  // schema in full. Ajv flags this as a style issue but the schemas are
+  // valid JSON Schema 2020-12. allErrors and other strict checks remain on.
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: true,
+    strictTypes: false,
+    strictRequired: false,
+    allowUnionTypes: true,
+  });
   addFormats(ajv);
   const resourceSchema = JSON.parse(readFileSync(resolve(SCHEMA_DIR, 'resource.schema.json'), 'utf8'));
   const eventSchema = JSON.parse(readFileSync(resolve(SCHEMA_DIR, 'event.schema.json'), 'utf8'));

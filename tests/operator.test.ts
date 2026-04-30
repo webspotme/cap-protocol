@@ -226,11 +226,25 @@ describe('recoverRegistry — torn-write recovery + tamper resistance', () => {
       'utf8',
     );
     // Run recovery — the cap_id mismatch must be caught and skipped.
-    await recoverRegistry(reg);
+    const report = await recoverRegistry(reg);
     // tool_attacker_target should NOT be hijacked
     const target = readResource(reg, 'tool_attacker_target');
     expect(target?.what).toBe('A demo capability');
     expect(target?.what).not.toBe('HIJACKED');
+    // Caller-visible warning entry for the tampered event
+    expect(report.warnings.length).toBeGreaterThan(0);
+    expect(report.warnings.some((w) => w.event_id === 'tampered-event')).toBe(true);
+  });
+
+  it('returns a RecoveryReport with warnings + reconciled arrays', async () => {
+    const { recoverRegistry } = await import('../src/utils/registry.js');
+    const r = makeResource();
+    const p = propose(reg, r);
+    commit(reg, p.run_id);
+    // Healthy registry: zero warnings, zero reconciled
+    const report = await recoverRegistry(reg);
+    expect(report.warnings).toEqual([]);
+    expect(report.reconciled).toEqual([]);
   });
 });
 
@@ -242,7 +256,8 @@ describe('FSM transition coverage (Codex finding fix)', () => {
   });
 
   // For each allowed transition, verify the operator accepts it.
-  const transitions: Array<[Parameters<typeof makeResource>[0]['state']['current'], Parameters<typeof makeResource>[0]['state']['current']]> = [
+  type StateName = Resource['state']['current'];
+  const transitions: Array<[StateName, StateName]> = [
     ['proposed', 'registered'],
     ['proposed', 'rejected'],
     ['registered', 'verified'],
@@ -256,7 +271,7 @@ describe('FSM transition coverage (Codex finding fix)', () => {
     ['recovered', 'active'],
     ['deprecated', 'archived'],
     ['deprecated', 'active'],
-  ] as const as Array<[any, any]>;
+  ];
 
   for (const [from, to] of transitions) {
     it(`accepts ${from} -> ${to}`, () => {
@@ -302,16 +317,6 @@ function ensureLifecycleForState(r: Resource, state: string): Resource {
   }
   return { ...r, lifecycle: lc };
 }
-
-  it('appends events in append-only fashion (no duplicate filenames)', () => {
-    const r = makeResource();
-    const p = propose(reg, r);
-    commit(reg, p.run_id);
-    const eventsRoot = join(reg.root, 'events');
-    const months = readdirSync(eventsRoot);
-    expect(months.length).toBeGreaterThan(0);
-  });
-});
 
 describe('appendEvent path-traversal hardening (MEDIUM finding fix)', () => {
   let reg: Registry;
