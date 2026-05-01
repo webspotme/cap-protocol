@@ -346,4 +346,106 @@ export async function reconstructAt(reg: Registry, capId: string, atISO: string)
   return current;
 }
 
+/**
+ * Advance a capability through its FSM by proposing + committing a new state.
+ *
+ * This is the convenient wrapper around `propose → assess → commit` for the
+ * common case of "this thing was registered, now I want to mark it verified
+ * and active". The transition is FSM-checked: a disallowed transition (e.g.
+ * `proposed → active`) will fail the assess phase.
+ *
+ * Lifecycle timestamps are populated automatically based on the target state.
+ */
+export function promote(
+  reg: Registry,
+  capId: string,
+  toState: LifecycleStateName,
+  opts: { operator?: string; force?: boolean } = {},
+): { proposalRunId: string; commitEvent: CapEvent } {
+  const current = readResource(reg, capId);
+  if (!current) {
+    throw new Error(`promote refused: cap_id ${capId} not found`);
+  }
+  const now = new Date().toISOString();
+  const next: Resource = {
+    ...current,
+    state: {
+      ...current.state,
+      current: toState,
+      since: now,
+      // For active states, populate last_verified — schema requires non-null.
+      last_verified: toState === 'active' || toState === 'degraded' || toState === 'recovered' ? now : current.state.last_verified,
+    },
+    lifecycle: ensureLifecycleForState(current.lifecycle, toState, now),
+  };
+  const p = propose(reg, next, { operator: opts.operator });
+  const ev = commit(reg, p.run_id, { operator: opts.operator, force: opts.force });
+  return { proposalRunId: p.run_id, commitEvent: ev };
+}
+
+function ensureLifecycleForState(
+  lc: Resource['lifecycle'],
+  state: LifecycleStateName,
+  now: string,
+): Resource['lifecycle'] {
+  const out = { ...lc };
+  // Populate timestamps when entering a state for the first time.
+  if (state === 'registered' && !out.registered_at) out.registered_at = now;
+  if (state === 'verified' && !out.verified_at) {
+    out.registered_at = out.registered_at ?? now;
+    out.verified_at = now;
+  }
+  if (state === 'active' && !out.activated_at) {
+    out.registered_at = out.registered_at ?? now;
+    out.verified_at = out.verified_at ?? now;
+    out.activated_at = now;
+  }
+  if (state === 'degraded' || state === 'recovered') {
+    out.registered_at = out.registered_at ?? now;
+    out.verified_at = out.verified_at ?? now;
+    out.activated_at = out.activated_at ?? now;
+  }
+  if (state === 'deprecated') {
+    out.registered_at = out.registered_at ?? now;
+    out.verified_at = out.verified_at ?? now;
+    out.activated_at = out.activated_at ?? now;
+    out.deprecated_at = out.deprecated_at ?? now;
+  }
+  if (state === 'archived') {
+    out.archived_at = out.archived_at ?? now;
+  }
+  return out;
+}
+
+/**
+ * Bulk import: propose + commit each Resource in `entries`. Returns a report
+ * with per-entry success/failure rather than aborting on the first failure,
+ * so callers can migrate large batches and inspect what didn't take.
+ */
+export function importBatch(
+  reg: Registry,
+  entries: Resource[],
+  opts: { operator?: string; force?: boolean; strictPII?: boolean } = {},
+): {
+  succeeded: Array<{ cap_id: string; event_id: string }>;
+  failed: Array<{ cap_id: string; reason: string }>;
+} {
+  const succeeded: Array<{ cap_id: string; event_id: string }> = [];
+  const failed: Array<{ cap_id: string; reason: string }> = [];
+  for (const r of entries) {
+    try {
+      const p = propose(reg, r, { operator: opts.operator });
+      const ev = commit(reg, p.run_id, {
+        operator: opts.operator,
+        force: opts.force,
+        strictPII: opts.strictPII,
+      });
+      succeeded.push({ cap_id: r.cap_id, event_id: ev.event_id });
+    } catch (err) {
+      failed.push({ cap_id: r.cap_id, reason: (err as Error).message });
+    }
+  }
+  return { succeeded, failed };
+}
+
 export type { LifecycleStateName };

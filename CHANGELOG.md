@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.1 (2026-05-01)
+
+Real-world dogfooding pass — migrated 35 production capabilities into a cap-protocol registry, found two ergonomic gaps, fixed both.
+
+### New CLI commands and library functions
+
+- **`cap promote <cap_id> <to_state>`** — advance a capability through the FSM in one command. Auto-populates lifecycle timestamps for the target state. Validates the transition through the existing FSM contract; an illegal transition fails clearly.
+- **`cap import-batch <file>`** — bulk-propose+commit a YAML or JSON file containing an array of `Resource` objects. Continues past failures (returns a per-entry success/fail report) so a 3,000-entry migration doesn't abort on the first bad record.
+- New library exports: `promote`, `importBatch`.
+
+### Why these matter
+
+Migrating 35 entries one at a time from the previous flat registry took 35 separate `cap propose` + `cap commit` calls. For a real registry of 3,000+ entries that's untenable. The two new commands make bulk migration a single CLI call and FSM advancement a one-liner instead of a re-propose.
+
+### Tests
+
+- 56/56 passing (5 new tests added for `promote` and `importBatch`).
+
 ## v0.1.0 (unreleased)
 
 Initial release.

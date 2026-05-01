@@ -248,6 +248,88 @@ describe('recoverRegistry — torn-write recovery + tamper resistance', () => {
   });
 });
 
+describe('promote — FSM state advance helper (v0.1.1)', () => {
+  let reg: Registry;
+  beforeEach(() => {
+    const root = mkdtempSync(join(tmpdir(), 'cap-test-promote-'));
+    reg = initRegistry(root);
+  });
+
+  it('advances proposed -> registered -> verified -> active', async () => {
+    const { promote } = await import('../src/operator/index.js');
+    const r = makeResource({
+      state: { current: 'proposed', since: new Date().toISOString(), health: 'green', last_verified: null, verifier: null },
+      lifecycle: { proposed_by: 'tester', proposed_at: new Date().toISOString(), registered_at: null, verified_at: null, activated_at: null, deprecated_at: null, archived_at: null },
+    });
+    const p = propose(reg, r);
+    commit(reg, p.run_id);
+    promote(reg, r.cap_id, 'registered');
+    expect(readResource(reg, r.cap_id)?.state.current).toBe('registered');
+    promote(reg, r.cap_id, 'verified');
+    expect(readResource(reg, r.cap_id)?.state.current).toBe('verified');
+    promote(reg, r.cap_id, 'active');
+    const final = readResource(reg, r.cap_id);
+    expect(final?.state.current).toBe('active');
+    expect(final?.lifecycle.activated_at).toBeTruthy();
+    expect(final?.state.last_verified).toBeTruthy();
+  });
+
+  it('rejects an FSM-illegal transition', async () => {
+    const { promote } = await import('../src/operator/index.js');
+    const r = makeResource({
+      state: { current: 'proposed', since: new Date().toISOString(), health: 'green', last_verified: null, verifier: null },
+      lifecycle: { proposed_by: 'tester', proposed_at: new Date().toISOString(), registered_at: null, verified_at: null, activated_at: null, deprecated_at: null, archived_at: null },
+    });
+    const p = propose(reg, r);
+    commit(reg, p.run_id);
+    // proposed -> active is not allowed; must go through registered + verified
+    expect(() => promote(reg, r.cap_id, 'active')).toThrow();
+  });
+
+  it('throws when cap_id does not exist', async () => {
+    const { promote } = await import('../src/operator/index.js');
+    expect(() => promote(reg, 'nonexistent_cap', 'active')).toThrow(/not found/);
+  });
+});
+
+describe('importBatch — bulk migration (v0.1.1)', () => {
+  let reg: Registry;
+  beforeEach(() => {
+    const root = mkdtempSync(join(tmpdir(), 'cap-test-batch-'));
+    reg = initRegistry(root);
+  });
+
+  it('imports a batch of valid Resources', async () => {
+    const { importBatch } = await import('../src/operator/index.js');
+    const entries = [
+      makeResource({ cap_id: 'tool_one' }),
+      makeResource({ cap_id: 'tool_two' }),
+      makeResource({ cap_id: 'tool_three' }),
+    ];
+    const report = importBatch(reg, entries);
+    expect(report.succeeded.length).toBe(3);
+    expect(report.failed.length).toBe(0);
+    expect(readResource(reg, 'tool_one')).not.toBeNull();
+    expect(readResource(reg, 'tool_three')).not.toBeNull();
+  });
+
+  it('continues past failures in a batch', async () => {
+    const { importBatch } = await import('../src/operator/index.js');
+    const entries = [
+      makeResource({ cap_id: 'tool_good_1' }),
+      makeResource({ cap_id: 'tool_with_secret', source: 'sk-ant-abcdefghijklmnopqrstuvwxyz12345' }),
+      makeResource({ cap_id: 'tool_good_2' }),
+    ];
+    const report = importBatch(reg, entries);
+    expect(report.succeeded.length).toBe(2);
+    expect(report.failed.length).toBe(1);
+    expect(report.failed[0]!.cap_id).toBe('tool_with_secret');
+    expect(readResource(reg, 'tool_good_1')).not.toBeNull();
+    expect(readResource(reg, 'tool_good_2')).not.toBeNull();
+    expect(readResource(reg, 'tool_with_secret')).toBeNull();
+  });
+});
+
 describe('FSM transition coverage (Codex finding fix)', () => {
   let reg: Registry;
   beforeEach(() => {

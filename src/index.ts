@@ -32,6 +32,8 @@ export {
   assess,
   commit,
   rollback,
+  promote,
+  importBatch,
   loadProposal,
   listProposals,
   reconstructAt,

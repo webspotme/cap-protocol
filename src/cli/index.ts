@@ -24,6 +24,8 @@ import {
   assess,
   commit,
   rollback,
+  promote,
+  importBatch,
   reconstructAt,
 } from '../operator/index.js';
 import { validateResource } from '../validator/index.js';
@@ -172,6 +174,57 @@ program
     const events = listEvents(reg, capId);
     for (const e of events) {
       process.stdout.write(`${e.timestamp ?? '?'}  ${e.phase.padEnd(8)} ${e.result.padEnd(4)} ${e.event_id}\n`);
+    }
+  });
+
+program
+  .command('promote <cap_id> <to_state>')
+  .description('Advance a capability through the FSM (e.g. proposed -> registered -> verified -> active)')
+  .requiredOption('-r, --root <path>', 'registry root')
+  .option('-f, --force', 'commit even if assessment fails')
+  .option('--operator <name>', 'who is promoting', 'cli')
+  .action((capId: string, toState: string, opts: { root: string; force?: boolean; operator: string }) => {
+    const reg = openRegistry(opts.root);
+    const result = promote(reg, capId, toState as 'proposed' | 'registered' | 'verified' | 'active' | 'degraded' | 'recovered' | 'deprecated' | 'archived' | 'rejected', {
+      operator: opts.operator,
+      force: opts.force,
+    });
+    process.stdout.write(`${result.commitEvent.event_id}\n`);
+  });
+
+program
+  .command('import-batch <file>')
+  .description('Bulk-propose+commit a YAML or JSON file containing an array of Resource objects')
+  .requiredOption('-r, --root <path>', 'registry root')
+  .option('-f, --force', 'commit even if individual entries fail assess')
+  .option('--no-strict-pii', 'disable PII pattern warnings (default: on)')
+  .option('--operator <name>', 'who is importing', 'cli')
+  .action((file: string, opts: { root: string; force?: boolean; strictPii: boolean; operator: string }) => {
+    const path = resolve(file);
+    const size = statSync(path).size;
+    // Same 5MB cap as `propose --from-file` to bound memory.
+    if (size > MAX_PROPOSAL_FILE_BYTES * 4) {
+      throw new Error(`import file is ${size} bytes; max is ${MAX_PROPOSAL_FILE_BYTES * 4} (use multiple smaller files)`);
+    }
+    const raw = readFileSync(path, 'utf8');
+    const parsed = path.endsWith('.json') ? JSON.parse(raw) : parseYAML(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`import file must contain a top-level array of Resource objects`);
+    }
+    const reg = openRegistry(opts.root);
+    const report = importBatch(reg, parsed as Resource[], {
+      operator: opts.operator,
+      force: opts.force,
+      strictPII: opts.strictPii !== false,
+    });
+    process.stdout.write(
+      `imported ${report.succeeded.length}/${report.succeeded.length + report.failed.length}; failed ${report.failed.length}\n`,
+    );
+    if (report.failed.length > 0) {
+      for (const f of report.failed.slice(0, 20)) {
+        process.stderr.write(`FAIL ${f.cap_id}: ${f.reason}\n`);
+      }
+      process.exit(1);
     }
   });
 
